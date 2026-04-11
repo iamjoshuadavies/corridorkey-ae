@@ -13,11 +13,37 @@
 #if AE_SDK_AVAILABLE
 
 // =============================================================================
-// Main Entry Point
+// Registration Entry Point — tells AE about this effect
 // =============================================================================
 
 extern "C" DllExport
-PF_Err PluginMain(
+PF_Err PluginDataEntryFunction2(
+    PF_PluginDataPtr    inPtr,
+    PF_PluginDataCB2    inPluginDataCallBackPtr,
+    SPBasicSuite*       inSPBasicSuitePtr,
+    const char*         inHostName,
+    const char*         inHostVersion)
+{
+    PF_Err result = PF_REGISTER_EFFECT_EXT2(
+        inPtr,
+        inPluginDataCallBackPtr,
+        CK_PLUGIN_NAME,        // "CorridorKey"
+        CK_PLUGIN_MATCH_NAME,  // "com.corridorkey.ae"
+        CK_PLUGIN_CATEGORY,    // "Keying"
+        AE_RESERVED_INFO,
+        "EffectMain",           // Entry point function name
+        "https://github.com/corridorkey-ae"
+    );
+
+    return result;
+}
+
+// =============================================================================
+// Effect Entry Point — called per-command by AE
+// =============================================================================
+
+PF_Err
+EffectMain(
     PF_Cmd          cmd,
     PF_InData       *in_data,
     PF_OutData      *out_data,
@@ -102,12 +128,11 @@ A_Err HandleGlobalSetup(PF_InData* in_data, PF_OutData* out_data)
     );
 
     out_data->out_flags =
-        PF_OutFlag_DEEP_COLOR_AWARE |
         PF_OutFlag_PIX_INDEPENDENT;
 
-    out_data->out_flags2 =
-        PF_OutFlag2_SUPPORTS_SMART_RENDER |
-        PF_OutFlag2_FLOAT_COLOR_AWARE;
+    // M1: Basic render only. Add PF_OutFlag2_SUPPORTS_SMART_RENDER
+    // when we implement PF_Cmd_SMART_PRE_RENDER / PF_Cmd_SMART_RENDER.
+    out_data->out_flags2 = 0;
 #endif
     return PF_Err_NONE;
 }

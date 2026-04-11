@@ -101,6 +101,59 @@ target_compile_definitions(CorridorKeyAE PRIVATE
     CK_VERSION_PATCH=${PROJECT_VERSION_PATCH}
 )
 
+# --- PiPL Resource (macOS) ---
+if(APPLE AND AE_SDK_FOUND)
+    find_program(REZ_TOOL Rez
+        PATHS
+            "/usr/bin"
+            "/Library/Developer/CommandLineTools/usr/bin"
+            "/Applications/Xcode.app/Contents/Developer/usr/bin"
+    )
+
+    if(REZ_TOOL)
+        message(STATUS "Rez found at: ${REZ_TOOL}")
+
+        set(PIPL_R "${CMAKE_CURRENT_SOURCE_DIR}/resources/CorridorKeyAEPiPL.r")
+        set(PIPL_RSRC "${CMAKE_CURRENT_BINARY_DIR}/CorridorKeyAEPiPL.rsrc")
+
+        add_custom_command(
+            OUTPUT "${PIPL_RSRC}"
+            COMMAND ${REZ_TOOL}
+                "${PIPL_R}"
+                -o "${PIPL_RSRC}"
+                -useDF
+                -i "${AE_SDK_PATH}/Headers"
+                -i "${AE_SDK_PATH}/Resources"
+                -d AE_OS_MAC
+            DEPENDS "${PIPL_R}"
+            COMMENT "Compiling PiPL resource with Rez"
+        )
+
+        add_custom_target(CorridorKeyPiPL DEPENDS "${PIPL_RSRC}")
+        add_dependencies(CorridorKeyAE CorridorKeyPiPL)
+
+        # Place .rsrc in bundle Resources and add PkgInfo, then ad-hoc codesign
+        add_custom_command(TARGET CorridorKeyAE POST_BUILD
+            # Copy PiPL resource into bundle
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_BUNDLE_DIR:CorridorKeyAE>/Contents/Resources"
+            COMMAND ${CMAKE_COMMAND} -E copy
+                "${PIPL_RSRC}"
+                "$<TARGET_BUNDLE_DIR:CorridorKeyAE>/Contents/Resources/CorridorKeyAEPiPL.rsrc"
+            # Create PkgInfo via a cmake script
+            COMMAND ${CMAKE_COMMAND}
+                -DPKGINFO_PATH=$<TARGET_BUNDLE_DIR:CorridorKeyAE>/Contents/PkgInfo
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/resources/WritePkgInfo.cmake"
+            # Ad-hoc codesign so macOS/AE accepts the plugin
+            COMMAND codesign --force --sign - --timestamp=none
+                "$<TARGET_BUNDLE_DIR:CorridorKeyAE>"
+            COMMENT "Packaging and signing plugin bundle"
+        )
+    else()
+        message(WARNING "Rez not found — PiPL resource will not be compiled. Plugin will not load in AE.")
+    endif()
+endif()
+
 # --- Install ---
 install(TARGETS CorridorKeyAE
     BUNDLE DESTINATION .

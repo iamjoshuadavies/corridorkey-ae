@@ -10,39 +10,20 @@
 namespace corridorkey {
 
 // --- Parameter IDs (order matters for AE serialization) ---
+// Only include params that are actually registered in SetupParams.
+// Add new IDs here AND register them in CorridorKeyAE_Params.cpp.
 enum ParamID : A_long {
     PARAM_INPUT = 0,    // Reserved: default input layer
 
-    // Input group
-    PARAM_INPUT_COLORSPACE,
-    PARAM_ALPHA_HINT_ENABLE,
-    PARAM_ALPHA_HINT_LAYER,
-
-    // Alpha Generation group
-    PARAM_ALPHA_MODE,           // Auto / External
-    PARAM_ALPHA_MODEL,          // Model selection popup
-    PARAM_PREPROCESS_ENABLE,
-
-    // Inference group
+    // Registered params (M1)
+    PARAM_OUTPUT_MODE,          // Processed / Matte / Foreground / Composite
     PARAM_DEVICE,               // Auto / CPU / GPU
-    PARAM_LOW_MEMORY_MODE,
     PARAM_QUALITY_MODE,         // Quality / Performance
-    PARAM_TILE_SIZE,
-
-    // Cleanup group
+    PARAM_LOW_MEMORY_MODE,
     PARAM_DESPILL_STRENGTH,
     PARAM_DESPECKLE_STRENGTH,
     PARAM_REFINER_STRENGTH,
     PARAM_MATTE_CLEANUP,
-
-    // Output group
-    PARAM_OUTPUT_MODE,          // Processed / Matte / Foreground / Composite
-
-    // Status (read-only display)
-    PARAM_STATUS_DEVICE,
-    PARAM_STATUS_VRAM,
-    PARAM_STATUS_MODEL_STATE,
-    PARAM_STATUS_WARMUP,
 
     PARAM_COUNT
 };

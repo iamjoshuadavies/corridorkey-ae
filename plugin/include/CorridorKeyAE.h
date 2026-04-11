@@ -45,12 +45,24 @@
 
 extern "C" {
 
-/**
- * Main plugin entry point dispatched by After Effects.
- * Routes commands to the appropriate handler.
- */
 #if AE_SDK_AVAILABLE
-    PF_Err PluginMain(
+    /**
+     * Registration entry point — tells AE about this effect.
+     * Called once when the plugin is first scanned.
+     */
+    DllExport PF_Err PluginDataEntryFunction2(
+        PF_PluginDataPtr    inPtr,
+        PF_PluginDataCB2    inPluginDataCallBackPtr,
+        SPBasicSuite*       inSPBasicSuitePtr,
+        const char*         inHostName,
+        const char*         inHostVersion
+    );
+
+    /**
+     * Effect entry point — called per-command by After Effects.
+     * Routes commands (about, setup, render, etc.) to handlers.
+     */
+    PF_Err EffectMain(
         PF_Cmd          cmd,
         PF_InData       *in_data,
         PF_OutData      *out_data,
