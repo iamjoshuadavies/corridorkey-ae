@@ -6,6 +6,7 @@ to perform physically accurate green-screen keying via MLX.
 """
 
 import logging
+import os
 import platform
 from pathlib import Path
 from typing import Optional
@@ -109,14 +110,15 @@ class MLXEngine(InferenceEngine):
             fg = result["fg"]          # (H, W, 3) uint8
             comp = result["comp"]      # (H, W, 3) uint8
 
-            # Debug: save intermediate results to /tmp for inspection
-            from PIL import Image as _PILImage
-            _PILImage.fromarray(alpha, "L").save("/tmp/ck_debug_alpha.png")
-            _PILImage.fromarray(fg, "RGB").save("/tmp/ck_debug_fg.png")
-            _PILImage.fromarray(comp, "RGB").save("/tmp/ck_debug_comp.png")
-            _PILImage.fromarray(rgb, "RGB").save("/tmp/ck_debug_input.png")
-            _PILImage.fromarray(alpha_hint, "L").save("/tmp/ck_debug_hint.png")
-            logger.info("Debug images saved to /tmp/ck_debug_*.png")
+            # Debug: save intermediate results (enable with CK_DEBUG=1 env var)
+            if os.environ.get("CK_DEBUG"):
+                from PIL import Image as _PILImage
+                _PILImage.fromarray(alpha, "L").save("/tmp/ck_debug_alpha.png")
+                _PILImage.fromarray(fg, "RGB").save("/tmp/ck_debug_fg.png")
+                _PILImage.fromarray(comp, "RGB").save("/tmp/ck_debug_comp.png")
+                _PILImage.fromarray(rgb, "RGB").save("/tmp/ck_debug_input.png")
+                _PILImage.fromarray(alpha_hint, "L").save("/tmp/ck_debug_hint.png")
+                logger.info("Debug images saved to /tmp/ck_debug_*.png")
 
             output_argb = np.zeros((h, w, 4), dtype=np.uint8)
 

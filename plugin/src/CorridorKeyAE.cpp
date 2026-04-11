@@ -128,11 +128,11 @@ A_Err HandleGlobalSetup(PF_InData* in_data, PF_OutData* out_data)
     );
 
     out_data->out_flags =
-        PF_OutFlag_PIX_INDEPENDENT;
+        PF_OutFlag_PIX_INDEPENDENT |
+        PF_OutFlag_DEEP_COLOR_AWARE;
 
-    // M1: Basic render only. Add PF_OutFlag2_SUPPORTS_SMART_RENDER
-    // when we implement PF_Cmd_SMART_PRE_RENDER / PF_Cmd_SMART_RENDER.
-    out_data->out_flags2 = 0;
+    out_data->out_flags2 =
+        PF_OutFlag2_FLOAT_COLOR_AWARE;
 #endif
     return PF_Err_NONE;
 }

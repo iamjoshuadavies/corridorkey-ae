@@ -2,9 +2,10 @@
     CorridorKeyAE_Bridge.cpp
     IPC bridge to the Python inference runtime.
 
-    M2: TCP socket connection to the Python runtime process.
-    Protocol: 4-byte big-endian length prefix + raw payload.
-    Frame data: simple binary format (header + raw ARGB pixels).
+    - Auto-launches the runtime subprocess on first connection attempt
+    - Discovers the runtime port from subprocess stdout ("PORT:XXXX")
+    - Reconnects with cooldown to avoid hammering on failure
+    - Graceful shutdown on plugin unload
 */
 
 #include "CorridorKeyAE_Bridge.h"
@@ -13,8 +14,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
-#include <thread>
 #include <chrono>
+#include <array>
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -30,6 +31,10 @@
     #include <netinet/in.h>
     #include <arpa/inet.h>
     #include <signal.h>
+    #include <fcntl.h>
+    #include <poll.h>
+    #include <mach-o/dyld.h>
+    #include <dlfcn.h>
     typedef int socket_t;
     #define INVALID_SOCK (-1)
     #define CLOSE_SOCKET close
@@ -38,14 +43,7 @@
 namespace corridorkey {
 
 // =============================================================================
-// Simple binary message helpers (no msgpack dependency for M2)
-//
-// Message format:
-//   [4 bytes] big-endian payload length
-//   [N bytes] payload (JSON-ish text for control, raw bytes for frames)
-//
-// For frame data, we use a simple binary header:
-//   "FRAME" (5 bytes) + width(4) + height(4) + rowbytes(4) + pixel_data
+// Binary message helpers
 // =============================================================================
 
 static uint32_t ReadU32BE(const uint8_t* p) {
@@ -82,7 +80,6 @@ static bool RecvAll(socket_t sock, void* data, size_t len) {
     return true;
 }
 
-// Send a length-prefixed message
 static bool SendMessage(socket_t sock, const std::vector<uint8_t>& payload) {
     uint8_t header[4];
     WriteU32BE(header, static_cast<uint32_t>(payload.size()));
@@ -93,12 +90,11 @@ static bool SendMessage(socket_t sock, const std::vector<uint8_t>& payload) {
     return true;
 }
 
-// Receive a length-prefixed message
 static bool RecvMessage(socket_t sock, std::vector<uint8_t>& payload) {
     uint8_t header[4];
     if (!RecvAll(sock, header, 4)) return false;
     uint32_t len = ReadU32BE(header);
-    if (len > 256 * 1024 * 1024) return false; // 256 MB max
+    if (len > 256 * 1024 * 1024) return false;
     payload.resize(len);
     if (len > 0) {
         if (!RecvAll(sock, payload.data(), len)) return false;
@@ -107,14 +103,55 @@ static bool RecvMessage(socket_t sock, std::vector<uint8_t>& payload) {
 }
 
 // =============================================================================
+// Find repo/runtime paths from plugin binary location
+// =============================================================================
+
+#ifndef _WIN32
+static std::string GetPluginBundlePath() {
+    // Get the path of the running plugin binary
+    // On macOS, _NSGetExecutablePath gives us the AE host path, not the plugin.
+    // Instead, use dladdr to find the address of a function in our dylib.
+    Dl_info info;
+    if (dladdr(reinterpret_cast<void*>(&GetPluginBundlePath), &info) && info.dli_fname) {
+        std::string path = info.dli_fname;
+        // path = .../CorridorKey.plugin/Contents/MacOS/CorridorKey
+        // We want the repo root: go up from build/plugin/CorridorKey.plugin/Contents/MacOS/
+        auto pos = path.rfind("/build/plugin/");
+        if (pos != std::string::npos) {
+            return path.substr(0, pos);
+        }
+        // Fallback: try to find the plugin bundle root
+        pos = path.rfind(".plugin/");
+        if (pos != std::string::npos) {
+            return path.substr(0, pos + 7); // includes .plugin
+        }
+    }
+    return "";
+}
+#endif
+
+// =============================================================================
 // Private Implementation
 // =============================================================================
+
+using steady_clock = std::chrono::steady_clock;
+using time_point = steady_clock::time_point;
 
 struct RuntimeBridge::Impl {
     bool connected = false;
     socket_t sock = INVALID_SOCK;
     pid_t child_pid = -1;
     int runtime_port = 0;
+    int stdout_pipe = -1;       // Pipe to read subprocess stdout
+
+    // Reconnect cooldown: don't retry too fast
+    time_point last_connect_attempt{};
+    int connect_failures = 0;
+    static constexpr int MAX_COOLDOWN_SEC = 10;
+
+    // Repo root path (discovered from plugin binary)
+    std::string repo_root;
+    bool repo_root_resolved = false;
 
     void CloseSocket() {
         if (sock != INVALID_SOCK) {
@@ -122,6 +159,164 @@ struct RuntimeBridge::Impl {
             sock = INVALID_SOCK;
         }
         connected = false;
+    }
+
+    bool ShouldAttemptConnect() {
+        if (connect_failures == 0) return true;
+        auto now = steady_clock::now();
+        int cooldown_sec = std::min(connect_failures, MAX_COOLDOWN_SEC);
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_connect_attempt).count();
+        return elapsed >= cooldown_sec;
+    }
+
+    void RecordConnectFailure() {
+        last_connect_attempt = steady_clock::now();
+        connect_failures++;
+    }
+
+    void RecordConnectSuccess() {
+        connect_failures = 0;
+    }
+
+    std::string FindRepoRoot() {
+        if (repo_root_resolved) return repo_root;
+        repo_root_resolved = true;
+#ifndef _WIN32
+        repo_root = GetPluginBundlePath();
+#endif
+        return repo_root;
+    }
+
+    bool LaunchRuntime() {
+#ifndef _WIN32
+        std::string root = FindRepoRoot();
+        if (root.empty()) return false;
+
+        std::string python = root + "/runtime/.venv/bin/python3";
+        std::string runtime_dir = root + "/runtime";
+
+        // Check python exists
+        if (access(python.c_str(), X_OK) != 0) {
+            // Try system python
+            python = "/opt/homebrew/bin/python3.12";
+            if (access(python.c_str(), X_OK) != 0) {
+                python = "/usr/local/bin/python3";
+                if (access(python.c_str(), X_OK) != 0) {
+                    return false;
+                }
+            }
+        }
+
+        // Create pipe for reading stdout (to get PORT:XXXX)
+        int pipefd[2];
+        if (pipe(pipefd) != 0) return false;
+
+        pid_t pid = fork();
+        if (pid < 0) {
+            close(pipefd[0]);
+            close(pipefd[1]);
+            return false;
+        }
+
+        if (pid == 0) {
+            // Child process
+            close(pipefd[0]); // Close read end
+            dup2(pipefd[1], STDOUT_FILENO); // Redirect stdout to pipe
+            close(pipefd[1]);
+
+            // Change to runtime directory
+            chdir(runtime_dir.c_str());
+
+            // Exec the runtime server
+            execl(python.c_str(), "python3", "-m", "server.main",
+                  "--port", "0", // Auto-assign port
+                  "--img-size", "512",
+                  nullptr);
+
+            // If exec failed
+            _exit(1);
+        }
+
+        // Parent process
+        close(pipefd[1]); // Close write end
+        child_pid = pid;
+        stdout_pipe = pipefd[0];
+
+        // Set pipe to non-blocking for reading
+        int flags = fcntl(stdout_pipe, F_GETFL, 0);
+        fcntl(stdout_pipe, F_SETFL, flags | O_NONBLOCK);
+
+        // Wait up to 30 seconds for PORT:XXXX on stdout
+        char buf[256] = {};
+        int buf_pos = 0;
+        auto start = steady_clock::now();
+        while (std::chrono::duration_cast<std::chrono::seconds>(
+                   steady_clock::now() - start).count() < 30) {
+            struct pollfd pfd;
+            pfd.fd = stdout_pipe;
+            pfd.events = POLLIN;
+            int ret = poll(&pfd, 1, 500); // 500ms poll
+            if (ret > 0) {
+                int n = read(stdout_pipe, buf + buf_pos, sizeof(buf) - buf_pos - 1);
+                if (n > 0) {
+                    buf_pos += n;
+                    buf[buf_pos] = '\0';
+                    // Look for PORT:XXXX
+                    char* port_str = strstr(buf, "PORT:");
+                    if (port_str) {
+                        runtime_port = atoi(port_str + 5);
+                        if (runtime_port > 0) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            // Check if child exited
+            int status;
+            pid_t result = waitpid(child_pid, &status, WNOHANG);
+            if (result == child_pid) {
+                child_pid = -1;
+                return false; // Child exited prematurely
+            }
+        }
+        // Timeout
+        return runtime_port > 0;
+#else
+        return false; // Windows: TODO
+#endif
+    }
+
+    bool ConnectToPort(int port) {
+        socket_t s = socket(AF_INET, SOCK_STREAM, 0);
+        if (s == INVALID_SOCK) return false;
+
+        // Short connect timeout
+        struct timeval connect_tv;
+        connect_tv.tv_sec = 0;
+        connect_tv.tv_usec = 500000; // 500ms
+        setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &connect_tv, sizeof(connect_tv));
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &connect_tv, sizeof(connect_tv));
+
+        struct sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(port);
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+        if (connect(s, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) != 0) {
+            CLOSE_SOCKET(s);
+            return false;
+        }
+
+        // Connected — set longer I/O timeout for inference
+        struct timeval io_tv;
+        io_tv.tv_sec = 30;
+        io_tv.tv_usec = 0;
+        setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &io_tv, sizeof(io_tv));
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &io_tv, sizeof(io_tv));
+
+        sock = s;
+        connected = true;
+        return true;
     }
 };
 
@@ -141,86 +336,46 @@ RuntimeBridge::~RuntimeBridge()
 
 bool RuntimeBridge::EnsureConnected()
 {
+    // Already connected?
     if (m_impl->connected && m_impl->sock != INVALID_SOCK) {
         return true;
     }
 
-    // Try to connect to an already-running runtime on the known port
+    // Cooldown: don't retry too fast after failures
+    if (!m_impl->ShouldAttemptConnect()) {
+        return false;
+    }
+
+    // 1. If we have a known port, try to connect to it
     if (m_impl->runtime_port > 0) {
-        socket_t sock = socket(AF_INET, SOCK_STREAM, 0);
-        if (sock == INVALID_SOCK) return false;
-
-        struct sockaddr_in addr{};
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(m_impl->runtime_port);
-        addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-
-        if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0) {
-            // Set longer timeout for inference I/O (10s)
-            struct timeval io_tv;
-            io_tv.tv_sec = 10;
-            io_tv.tv_usec = 0;
-            setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &io_tv, sizeof(io_tv));
-            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &io_tv, sizeof(io_tv));
-
-            m_impl->sock = sock;
-            m_impl->connected = true;
-
-            // Send a ping to verify
-            std::string ping = "{\"type\":\"ping\"}";
-            std::vector<uint8_t> ping_data(ping.begin(), ping.end());
-            if (SendMessage(sock, ping_data)) {
-                std::vector<uint8_t> response;
-                if (RecvMessage(sock, response)) {
-                    // Got a response — we're connected
-                    return true;
-                }
-            }
-            // Failed to ping — close and retry
-            m_impl->CloseSocket();
-        } else {
-            CLOSE_SOCKET(sock);
+        if (m_impl->ConnectToPort(m_impl->runtime_port)) {
+            m_impl->RecordConnectSuccess();
+            return true;
         }
     }
 
-    // TODO: Auto-launch runtime subprocess
-    // For M2, the runtime must be started manually:
-    //   cd runtime && source .venv/bin/activate && python -m server.main --port 12345
-    // The plugin tries to connect to port 12345 by default.
-    if (m_impl->runtime_port == 0) {
-        m_impl->runtime_port = 12345; // Default dev port
+    // 2. If no runtime running, try to launch one
+    if (m_impl->child_pid <= 0) {
+        if (m_impl->LaunchRuntime() && m_impl->runtime_port > 0) {
+            // Give the server a moment to start accepting
+            usleep(200000); // 200ms
+            if (m_impl->ConnectToPort(m_impl->runtime_port)) {
+                m_impl->RecordConnectSuccess();
+                return true;
+            }
+        }
     }
 
-    // Try connecting to the default port
-    socket_t sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock == INVALID_SOCK) return false;
-
-    struct sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(m_impl->runtime_port);
-    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-
-    // Connect timeout: short (200ms) so we don't block AE if runtime isn't up
-    struct timeval connect_tv;
-    connect_tv.tv_sec = 0;
-    connect_tv.tv_usec = 200000; // 200ms
-    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &connect_tv, sizeof(connect_tv));
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &connect_tv, sizeof(connect_tv));
-
-    if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0) {
-        // Once connected, set a longer timeout for inference (10s)
-        struct timeval io_tv;
-        io_tv.tv_sec = 10;
-        io_tv.tv_usec = 0;
-        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &io_tv, sizeof(io_tv));
-        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &io_tv, sizeof(io_tv));
-
-        m_impl->sock = sock;
-        m_impl->connected = true;
-        return true;
+    // 3. Fallback: try the dev port (12345) in case user started it manually
+    if (m_impl->runtime_port != 12345) {
+        if (m_impl->ConnectToPort(12345)) {
+            m_impl->runtime_port = 12345;
+            m_impl->RecordConnectSuccess();
+            return true;
+        }
     }
 
-    CLOSE_SOCKET(sock);
+    m_impl->RecordConnectFailure();
     return false;
 }
 
@@ -240,21 +395,18 @@ bool RuntimeBridge::ProcessFrame(const FrameRequest& request, FrameResponse& res
     size_t header_size = 5 + 4 + 4 + 4 + 1 + 4 + 4 + 4 + 4 + 1; // 39 bytes base
     size_t hint_header_size = 0;
     if (request.has_alpha_hint) {
-        hint_header_size = 4 + 4 + 4; // hint dimensions
+        hint_header_size = 4 + 4 + 4;
     }
     size_t total = header_size + hint_header_size +
                    request.pixel_data.size() + request.hint_pixel_data.size();
     std::vector<uint8_t> payload(total);
 
-    // Magic
     memcpy(payload.data(), "FRAME", 5);
-    // Dimensions
     WriteU32BE(payload.data() + 5, request.width);
     WriteU32BE(payload.data() + 9, request.height);
     WriteU32BE(payload.data() + 13, request.rowbytes);
-    // Output mode
     payload[17] = static_cast<uint8_t>(request.output_mode);
-    // Parameters as big-endian floats
+
     auto writeFloat = [](uint8_t* p, float v) {
         uint32_t bits;
         memcpy(&bits, &v, 4);
@@ -267,7 +419,6 @@ bool RuntimeBridge::ProcessFrame(const FrameRequest& request, FrameResponse& res
     writeFloat(payload.data() + 22, request.despeckle);
     writeFloat(payload.data() + 26, request.refiner);
     writeFloat(payload.data() + 30, request.matte_cleanup);
-    // Alpha hint flag
     payload[34] = request.has_alpha_hint ? 1 : 0;
 
     size_t offset = 35;
@@ -277,12 +428,10 @@ bool RuntimeBridge::ProcessFrame(const FrameRequest& request, FrameResponse& res
         WriteU32BE(payload.data() + offset + 8, request.hint_rowbytes);
         offset += 12;
     }
-    // Main pixel data
     if (!request.pixel_data.empty()) {
         memcpy(payload.data() + offset, request.pixel_data.data(), request.pixel_data.size());
         offset += request.pixel_data.size();
     }
-    // Hint pixel data
     if (request.has_alpha_hint && !request.hint_pixel_data.empty()) {
         memcpy(payload.data() + offset, request.hint_pixel_data.data(), request.hint_pixel_data.size());
     }
@@ -304,10 +453,8 @@ bool RuntimeBridge::ProcessFrame(const FrameRequest& request, FrameResponse& res
     }
 
     // Parse response: "FRAME" (5) + width(4) + height(4) + rowbytes(4) + pixel_data
-    // Response always uses the 17-byte legacy header (no params in response)
     const size_t resp_header_size = 5 + 4 + 4 + 4; // 17 bytes
     if (resp_data.size() < resp_header_size || memcmp(resp_data.data(), "FRAME", 5) != 0) {
-        // Check for error response
         if (resp_data.size() > 5 && memcmp(resp_data.data(), "ERROR", 5) == 0) {
             response.success = false;
             response.error_message = std::string(
@@ -352,7 +499,6 @@ bool RuntimeBridge::GetStatus(RuntimeStatus& status)
         return false;
     }
 
-    // For now, just mark as connected
     status.model_state = "connected";
     return true;
 }
@@ -361,18 +507,27 @@ void RuntimeBridge::Shutdown()
 {
     if (m_impl) {
         if (m_impl->connected && m_impl->sock != INVALID_SOCK) {
-            // Send shutdown message
             std::string msg = "{\"type\":\"shutdown\"}";
             std::vector<uint8_t> payload(msg.begin(), msg.end());
             SendMessage(m_impl->sock, payload);
         }
         m_impl->CloseSocket();
 
-        // Kill child process if we launched one
+        if (m_impl->stdout_pipe >= 0) {
+            close(m_impl->stdout_pipe);
+            m_impl->stdout_pipe = -1;
+        }
+
         if (m_impl->child_pid > 0) {
 #ifndef _WIN32
             kill(m_impl->child_pid, SIGTERM);
-            waitpid(m_impl->child_pid, nullptr, WNOHANG);
+            // Give it a moment, then force kill
+            usleep(500000); // 500ms
+            int status;
+            if (waitpid(m_impl->child_pid, &status, WNOHANG) == 0) {
+                kill(m_impl->child_pid, SIGKILL);
+                waitpid(m_impl->child_pid, &status, 0);
+            }
 #endif
             m_impl->child_pid = -1;
         }

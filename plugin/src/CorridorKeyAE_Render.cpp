@@ -178,6 +178,97 @@ void DrawText(PF_LayerDef* layer, int x, int y, const char* text, PF_Pixel8 colo
 #endif // AE_SDK_AVAILABLE
 
 // =============================================================================
+// Pixel format conversion helpers
+// =============================================================================
+
+#if AE_SDK_AVAILABLE
+
+// Detect bytes per pixel from the layer dimensions
+static int DetectBytesPerPixel(PF_LayerDef* layer) {
+    if (layer->width == 0) return 4;
+    int bpp = layer->rowbytes / layer->width;
+    // Clamp to known formats: 4 (8bpc), 8 (16bpc), 16 (32bpc float)
+    if (bpp >= 16) return 16;
+    if (bpp >= 8) return 8;
+    return 4;
+}
+
+// Convert any bit depth to 8bpc ARGB for the bridge
+// Returns: 8bpc pixel data (width*4 rowbytes, no padding)
+static std::vector<uint8_t> ConvertTo8bpc(PF_LayerDef* layer, int bpp) {
+    int w = layer->width;
+    int h = layer->height;
+    std::vector<uint8_t> out(w * h * 4);
+
+    for (int y = 0; y < h; y++) {
+        const char* src_row = reinterpret_cast<const char*>(layer->data) + y * layer->rowbytes;
+        uint8_t* dst_row = out.data() + y * w * 4;
+
+        if (bpp == 4) {
+            // 8bpc: direct copy
+            memcpy(dst_row, src_row, w * 4);
+        } else if (bpp == 8) {
+            // 16bpc: each channel is uint16 (0-32768), scale to 0-255
+            const uint16_t* src16 = reinterpret_cast<const uint16_t*>(src_row);
+            for (int x = 0; x < w; x++) {
+                dst_row[x*4+0] = static_cast<uint8_t>(src16[x*4+0] * 255 / 32768); // A
+                dst_row[x*4+1] = static_cast<uint8_t>(src16[x*4+1] * 255 / 32768); // R
+                dst_row[x*4+2] = static_cast<uint8_t>(src16[x*4+2] * 255 / 32768); // G
+                dst_row[x*4+3] = static_cast<uint8_t>(src16[x*4+3] * 255 / 32768); // B
+            }
+        } else {
+            // 32bpc float: each channel is float (0.0-1.0), scale to 0-255
+            const float* srcf = reinterpret_cast<const float*>(src_row);
+            for (int x = 0; x < w; x++) {
+                auto clamp = [](float v) -> uint8_t {
+                    if (v <= 0.0f) return 0;
+                    if (v >= 1.0f) return 255;
+                    return static_cast<uint8_t>(v * 255.0f + 0.5f);
+                };
+                dst_row[x*4+0] = clamp(srcf[x*4+0]); // A
+                dst_row[x*4+1] = clamp(srcf[x*4+1]); // R
+                dst_row[x*4+2] = clamp(srcf[x*4+2]); // G
+                dst_row[x*4+3] = clamp(srcf[x*4+3]); // B
+            }
+        }
+    }
+    return out;
+}
+
+// Write 8bpc result back to the output layer at its native bit depth
+static void WriteFrom8bpc(PF_LayerDef* layer, const uint8_t* src8, int bpp) {
+    int w = layer->width;
+    int h = layer->height;
+
+    for (int y = 0; y < h; y++) {
+        char* dst_row = reinterpret_cast<char*>(layer->data) + y * layer->rowbytes;
+        const uint8_t* src_row = src8 + y * w * 4;
+
+        if (bpp == 4) {
+            memcpy(dst_row, src_row, w * 4);
+        } else if (bpp == 8) {
+            uint16_t* dst16 = reinterpret_cast<uint16_t*>(dst_row);
+            for (int x = 0; x < w; x++) {
+                dst16[x*4+0] = static_cast<uint16_t>(src_row[x*4+0]) * 32768 / 255;
+                dst16[x*4+1] = static_cast<uint16_t>(src_row[x*4+1]) * 32768 / 255;
+                dst16[x*4+2] = static_cast<uint16_t>(src_row[x*4+2]) * 32768 / 255;
+                dst16[x*4+3] = static_cast<uint16_t>(src_row[x*4+3]) * 32768 / 255;
+            }
+        } else {
+            float* dstf = reinterpret_cast<float*>(dst_row);
+            for (int x = 0; x < w; x++) {
+                dstf[x*4+0] = src_row[x*4+0] / 255.0f;
+                dstf[x*4+1] = src_row[x*4+1] / 255.0f;
+                dstf[x*4+2] = src_row[x*4+2] / 255.0f;
+                dstf[x*4+3] = src_row[x*4+3] / 255.0f;
+            }
+        }
+    }
+}
+
+#endif
+
+// =============================================================================
 // Bridge singleton (lives across render calls)
 // =============================================================================
 
@@ -201,29 +292,29 @@ A_Err RenderEffect(
     ERR(PF_COPY(&params[0]->u.ld, output, NULL, NULL));
     if (err) return err;
 
+    // Detect bit depth of the working layer
+    PF_LayerDef* input = &params[0]->u.ld;
+    int bpp = DetectBytesPerPixel(input);
+
     // Try to connect to the Python runtime
     bool bridge_ok = g_bridge.EnsureConnected();
 
     if (bridge_ok) {
         // --- Bridge connected: send frame to Python for processing ---
-        PF_LayerDef* input = &params[0]->u.ld;
-
         FrameRequest request;
         request.width = input->width;
         request.height = input->height;
-        request.rowbytes = input->rowbytes;
+
+        // Always send 8bpc to the bridge (model only works at 8bpc)
+        request.pixel_data = ConvertTo8bpc(input, bpp);
+        request.rowbytes = input->width * 4; // 8bpc, no padding
 
         // Read effect parameters from AE
-        request.output_mode = params[PARAM_OUTPUT_MODE]->u.pd.value - 1;  // AE popups are 1-indexed
+        request.output_mode = params[PARAM_OUTPUT_MODE]->u.pd.value - 1;
         request.despill = params[PARAM_DESPILL_STRENGTH]->u.fs_d.value;
         request.despeckle = params[PARAM_DESPECKLE_STRENGTH]->u.fs_d.value;
         request.refiner = params[PARAM_REFINER_STRENGTH]->u.fs_d.value;
         request.matte_cleanup = params[PARAM_MATTE_CLEANUP]->u.fs_d.value;
-
-        // Extract pixel data from the input layer
-        size_t data_size = static_cast<size_t>(input->height) * input->rowbytes;
-        request.pixel_data.resize(data_size);
-        memcpy(request.pixel_data.data(), input->data, data_size);
 
         // Check out the alpha hint layer (if user selected one)
         PF_ParamDef hint_param;
@@ -233,44 +324,49 @@ A_Err RenderEffect(
                               in_data->time_scale, &hint_param));
         if (!err && hint_param.u.ld.data) {
             PF_LayerDef* hint_layer = &hint_param.u.ld;
+            int hint_bpp = DetectBytesPerPixel(hint_layer);
             request.has_alpha_hint = true;
             request.hint_width = hint_layer->width;
             request.hint_height = hint_layer->height;
-            request.hint_rowbytes = hint_layer->rowbytes;
-            size_t hint_size = static_cast<size_t>(hint_layer->height) * hint_layer->rowbytes;
-            request.hint_pixel_data.resize(hint_size);
-            memcpy(request.hint_pixel_data.data(), hint_layer->data, hint_size);
+            request.hint_pixel_data = ConvertTo8bpc(hint_layer, hint_bpp);
+            request.hint_rowbytes = hint_layer->width * 4;
         }
         ERR2(PF_CHECKIN_PARAM(in_data, &hint_param));
 
         FrameResponse response;
         if (g_bridge.ProcessFrame(request, response) && response.success) {
-            // Write processed pixels back to output
-            size_t out_size = static_cast<size_t>(output->height) * output->rowbytes;
-            if (response.pixel_data.size() >= out_size) {
-                memcpy(output->data, response.pixel_data.data(), out_size);
+            // Write 8bpc result back at the output's native bit depth
+            size_t expected = static_cast<size_t>(output->width) * output->height * 4;
+            if (response.pixel_data.size() >= expected) {
+                WriteFrom8bpc(output, response.pixel_data.data(), bpp);
             }
         } else {
-            // Bridge error — show error overlay
-            PF_Pixel8 bg = {180, 80, 0, 0};
-            DrawRect(output, 0, 0, output->width, 50, bg);
-            PF_Pixel8 white = {255, 255, 255, 255};
-            DrawText(output, 10, 8, "CORRIDORKEY BRIDGE ERROR", white, 3);
+            // Bridge error — show error overlay (8bpc drawing on output)
+            if (bpp == 4) {
+                PF_Pixel8 bg = {180, 80, 0, 0};
+                DrawRect(output, 0, 0, output->width, 50, bg);
+                PF_Pixel8 white = {255, 255, 255, 255};
+                DrawText(output, 10, 8, "CORRIDORKEY BRIDGE ERROR", white, 3);
+            }
         }
     } else {
         // --- Bridge offline: show fallback diagnostic overlay ---
-        PF_Pixel8 bg = {180, 0, 0, 0}; // alpha=180, black
-        int bar_height = 40;
-        if (output->height > 200) bar_height = 60;
-        DrawRect(output, 0, 0, output->width, bar_height, bg);
+        if (bpp == 4) {
+            // Only draw text overlay at 8bpc (safe)
+            PF_Pixel8 bg = {180, 0, 0, 0};
+            int bar_height = 40;
+            if (output->height > 200) bar_height = 60;
+            DrawRect(output, 0, 0, output->width, bar_height, bg);
 
-        PF_Pixel8 white = {255, 255, 255, 255};
-        int text_scale = 3;
-        if (output->height > 400) text_scale = 4;
-        DrawText(output, 10, 8, "CORRIDORKEY M2", white, text_scale);
+            PF_Pixel8 white = {255, 255, 255, 255};
+            int text_scale = 3;
+            if (output->height > 400) text_scale = 4;
+            DrawText(output, 10, 8, "CORRIDORKEY", white, text_scale);
 
-        PF_Pixel8 yellow = {255, 255, 200, 0};
-        DrawText(output, 10, 8 + 7 * text_scale + 4, "BRIDGE: OFFLINE", yellow, 2);
+            PF_Pixel8 yellow = {255, 255, 200, 0};
+            DrawText(output, 10, 8 + 7 * text_scale + 4, "BRIDGE: OFFLINE", yellow, 2);
+        }
+        // At 16/32bpc without bridge: just passthrough (already copied above)
     }
 
     return err;
