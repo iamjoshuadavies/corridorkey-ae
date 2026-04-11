@@ -156,6 +156,13 @@ bool RuntimeBridge::EnsureConnected()
         addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
         if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0) {
+            // Set longer timeout for inference I/O (10s)
+            struct timeval io_tv;
+            io_tv.tv_sec = 10;
+            io_tv.tv_usec = 0;
+            setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &io_tv, sizeof(io_tv));
+            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &io_tv, sizeof(io_tv));
+
             m_impl->sock = sock;
             m_impl->connected = true;
 
@@ -193,14 +200,21 @@ bool RuntimeBridge::EnsureConnected()
     addr.sin_port = htons(m_impl->runtime_port);
     addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
-    // Set a short connect timeout so we don't block AE's render thread
-    struct timeval tv;
-    tv.tv_sec = 0;
-    tv.tv_usec = 200000; // 200ms
-    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    // Connect timeout: short (200ms) so we don't block AE if runtime isn't up
+    struct timeval connect_tv;
+    connect_tv.tv_sec = 0;
+    connect_tv.tv_usec = 200000; // 200ms
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &connect_tv, sizeof(connect_tv));
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &connect_tv, sizeof(connect_tv));
 
     if (connect(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) == 0) {
+        // Once connected, set a longer timeout for inference (10s)
+        struct timeval io_tv;
+        io_tv.tv_sec = 10;
+        io_tv.tv_usec = 0;
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &io_tv, sizeof(io_tv));
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &io_tv, sizeof(io_tv));
+
         m_impl->sock = sock;
         m_impl->connected = true;
         return true;
@@ -218,10 +232,18 @@ bool RuntimeBridge::ProcessFrame(const FrameRequest& request, FrameResponse& res
         return false;
     }
 
-    // Build the frame message:
-    // "FRAME" (5) + width(4) + height(4) + rowbytes(4) + pixel_data
-    size_t header_size = 5 + 4 + 4 + 4;
-    size_t total = header_size + request.pixel_data.size();
+    // Build the frame message (extended format with params + optional alpha hint):
+    // "FRAME" (5) + width(4) + height(4) + rowbytes(4)
+    // + output_mode(1) + despill(4f) + despeckle(4f) + refiner(4f) + matte_cleanup(4f)
+    // + has_hint(1) + [hint_width(4) + hint_height(4) + hint_rowbytes(4)] (if has_hint)
+    // + pixel_data + [hint_pixel_data] (if has_hint)
+    size_t header_size = 5 + 4 + 4 + 4 + 1 + 4 + 4 + 4 + 4 + 1; // 39 bytes base
+    size_t hint_header_size = 0;
+    if (request.has_alpha_hint) {
+        hint_header_size = 4 + 4 + 4; // hint dimensions
+    }
+    size_t total = header_size + hint_header_size +
+                   request.pixel_data.size() + request.hint_pixel_data.size();
     std::vector<uint8_t> payload(total);
 
     // Magic
@@ -230,9 +252,39 @@ bool RuntimeBridge::ProcessFrame(const FrameRequest& request, FrameResponse& res
     WriteU32BE(payload.data() + 5, request.width);
     WriteU32BE(payload.data() + 9, request.height);
     WriteU32BE(payload.data() + 13, request.rowbytes);
-    // Pixel data
+    // Output mode
+    payload[17] = static_cast<uint8_t>(request.output_mode);
+    // Parameters as big-endian floats
+    auto writeFloat = [](uint8_t* p, float v) {
+        uint32_t bits;
+        memcpy(&bits, &v, 4);
+        p[0] = (bits >> 24) & 0xFF;
+        p[1] = (bits >> 16) & 0xFF;
+        p[2] = (bits >> 8)  & 0xFF;
+        p[3] = bits & 0xFF;
+    };
+    writeFloat(payload.data() + 18, request.despill);
+    writeFloat(payload.data() + 22, request.despeckle);
+    writeFloat(payload.data() + 26, request.refiner);
+    writeFloat(payload.data() + 30, request.matte_cleanup);
+    // Alpha hint flag
+    payload[34] = request.has_alpha_hint ? 1 : 0;
+
+    size_t offset = 35;
+    if (request.has_alpha_hint) {
+        WriteU32BE(payload.data() + offset, request.hint_width);
+        WriteU32BE(payload.data() + offset + 4, request.hint_height);
+        WriteU32BE(payload.data() + offset + 8, request.hint_rowbytes);
+        offset += 12;
+    }
+    // Main pixel data
     if (!request.pixel_data.empty()) {
-        memcpy(payload.data() + header_size, request.pixel_data.data(), request.pixel_data.size());
+        memcpy(payload.data() + offset, request.pixel_data.data(), request.pixel_data.size());
+        offset += request.pixel_data.size();
+    }
+    // Hint pixel data
+    if (request.has_alpha_hint && !request.hint_pixel_data.empty()) {
+        memcpy(payload.data() + offset, request.hint_pixel_data.data(), request.hint_pixel_data.size());
     }
 
     if (!SendMessage(m_impl->sock, payload)) {
@@ -252,7 +304,9 @@ bool RuntimeBridge::ProcessFrame(const FrameRequest& request, FrameResponse& res
     }
 
     // Parse response: "FRAME" (5) + width(4) + height(4) + rowbytes(4) + pixel_data
-    if (resp_data.size() < header_size || memcmp(resp_data.data(), "FRAME", 5) != 0) {
+    // Response always uses the 17-byte legacy header (no params in response)
+    const size_t resp_header_size = 5 + 4 + 4 + 4; // 17 bytes
+    if (resp_data.size() < resp_header_size || memcmp(resp_data.data(), "FRAME", 5) != 0) {
         // Check for error response
         if (resp_data.size() > 5 && memcmp(resp_data.data(), "ERROR", 5) == 0) {
             response.success = false;
@@ -271,7 +325,7 @@ bool RuntimeBridge::ProcessFrame(const FrameRequest& request, FrameResponse& res
     response.height = ReadU32BE(resp_data.data() + 9);
     response.rowbytes = ReadU32BE(resp_data.data() + 13);
     response.pixel_data.assign(
-        resp_data.begin() + header_size,
+        resp_data.begin() + resp_header_size,
         resp_data.end()
     );
     response.success = true;

@@ -20,7 +20,7 @@ torch = [
     "torchvision>=0.16",
 ]
 mlx = [
-    "mlx>=0.5",
+    "corridorkey-mlx @ git+https://github.com/nikopueringer/corridorkey-mlx.git",
 ]
 dev = [
     "pytest>=7.0",

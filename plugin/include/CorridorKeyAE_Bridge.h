@@ -76,6 +76,13 @@ struct FrameRequest {
     uint32_t rowbytes = 0;
     std::vector<uint8_t> pixel_data;    // ARGB 8bpc
 
+    // Alpha hint layer (optional — from AE layer parameter)
+    bool has_alpha_hint = false;
+    uint32_t hint_width = 0;
+    uint32_t hint_height = 0;
+    uint32_t hint_rowbytes = 0;
+    std::vector<uint8_t> hint_pixel_data;   // ARGB 8bpc
+
     // Parameters
     int32_t output_mode = 0;
     int32_t device_mode = 0;

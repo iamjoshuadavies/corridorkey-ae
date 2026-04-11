@@ -195,6 +195,7 @@ A_Err RenderEffect(
 {
 #if AE_SDK_AVAILABLE
     PF_Err err = PF_Err_NONE;
+    PF_Err err2 = PF_Err_NONE; // For ERR2 macro (checkin)
 
     // Copy input to output as baseline
     ERR(PF_COPY(&params[0]->u.ld, output, NULL, NULL));
@@ -212,10 +213,35 @@ A_Err RenderEffect(
         request.height = input->height;
         request.rowbytes = input->rowbytes;
 
+        // Read effect parameters from AE
+        request.output_mode = params[PARAM_OUTPUT_MODE]->u.pd.value - 1;  // AE popups are 1-indexed
+        request.despill = params[PARAM_DESPILL_STRENGTH]->u.fs_d.value;
+        request.despeckle = params[PARAM_DESPECKLE_STRENGTH]->u.fs_d.value;
+        request.refiner = params[PARAM_REFINER_STRENGTH]->u.fs_d.value;
+        request.matte_cleanup = params[PARAM_MATTE_CLEANUP]->u.fs_d.value;
+
         // Extract pixel data from the input layer
         size_t data_size = static_cast<size_t>(input->height) * input->rowbytes;
         request.pixel_data.resize(data_size);
         memcpy(request.pixel_data.data(), input->data, data_size);
+
+        // Check out the alpha hint layer (if user selected one)
+        PF_ParamDef hint_param;
+        AEFX_CLR_STRUCT(hint_param);
+        ERR(PF_CHECKOUT_PARAM(in_data, PARAM_ALPHA_HINT_LAYER,
+                              in_data->current_time, in_data->time_step,
+                              in_data->time_scale, &hint_param));
+        if (!err && hint_param.u.ld.data) {
+            PF_LayerDef* hint_layer = &hint_param.u.ld;
+            request.has_alpha_hint = true;
+            request.hint_width = hint_layer->width;
+            request.hint_height = hint_layer->height;
+            request.hint_rowbytes = hint_layer->rowbytes;
+            size_t hint_size = static_cast<size_t>(hint_layer->height) * hint_layer->rowbytes;
+            request.hint_pixel_data.resize(hint_size);
+            memcpy(request.hint_pixel_data.data(), hint_layer->data, hint_size);
+        }
+        ERR2(PF_CHECKIN_PARAM(in_data, &hint_param));
 
         FrameResponse response;
         if (g_bridge.ProcessFrame(request, response) && response.success) {
