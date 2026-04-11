@@ -1,8 +1,14 @@
 """
 IPC Server — Local socket server for plugin-runtime communication.
 
-Protocol: msgpack-framed messages over TCP or Unix domain sockets.
+Protocol: Length-prefixed messages over TCP or Unix domain sockets.
 Each message is prefixed with a 4-byte big-endian length header.
+
+Messages can be:
+  - JSON text (for control: ping, status, shutdown)
+  - Binary FRAME data (for frame processing)
+
+The handler.handle_raw() method accepts raw bytes and dispatches accordingly.
 """
 
 import logging
@@ -10,8 +16,6 @@ import socket
 import struct
 from pathlib import Path
 from typing import Optional
-
-import msgpack
 
 from server.handler import RequestHandler
 
@@ -82,11 +86,11 @@ class IPCServer:
             conn.settimeout(30.0)
             while self._running:
                 try:
-                    msg = self._recv_message(conn)
-                    if msg is None:
+                    data = self._recv_raw(conn)
+                    if data is None:
                         break
-                    response = self._handler.handle(msg)
-                    self._send_message(conn, response)
+                    response = self._handler.handle_raw(data)
+                    self._send_raw(conn, response)
                 except (ConnectionResetError, BrokenPipeError):
                     logger.info("Client disconnected")
                     break
@@ -96,8 +100,8 @@ class IPCServer:
                     logger.exception("Error handling message")
                     break
 
-    def _recv_message(self, conn: socket.socket) -> Optional[dict]:
-        """Receive a length-prefixed msgpack message."""
+    def _recv_raw(self, conn: socket.socket) -> Optional[bytes]:
+        """Receive a length-prefixed raw message."""
         header = self._recv_exact(conn, HEADER_SIZE)
         if not header:
             return None
@@ -105,13 +109,10 @@ class IPCServer:
         if length > MAX_MESSAGE_SIZE:
             raise ValueError(f"Message too large: {length}")
         data = self._recv_exact(conn, length)
-        if not data:
-            return None
-        return msgpack.unpackb(data, raw=False)  # type: ignore[no-any-return]
+        return data
 
-    def _send_message(self, conn: socket.socket, msg: dict) -> None:
-        """Send a length-prefixed msgpack message."""
-        data = msgpack.packb(msg, use_bin_type=True)
+    def _send_raw(self, conn: socket.socket, data: bytes) -> None:
+        """Send a length-prefixed raw message."""
         header = struct.pack(HEADER_FORMAT, len(data))
         conn.sendall(header + data)
 
@@ -121,7 +122,7 @@ class IPCServer:
         chunks: list[bytes] = []
         received = 0
         while received < size:
-            chunk = conn.recv(size - received)
+            chunk = conn.recv(min(size - received, 65536))
             if not chunk:
                 return None
             chunks.append(chunk)

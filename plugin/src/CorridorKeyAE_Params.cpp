@@ -23,6 +23,14 @@ A_Err SetupParams(PF_InData* in_data, PF_OutData* out_data)
         PARAM_OUTPUT_MODE
     );
 
+    // --- Alpha Hint Layer ---
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_LAYER(
+        "Alpha Hint",
+        PF_LayerDefault_NONE,   // No default layer — user must select
+        PARAM_ALPHA_HINT_LAYER
+    );
+
     // --- Device ---
     AEFX_CLR_STRUCT(def);
     PF_ADD_POPUP(

@@ -15,8 +15,9 @@ namespace corridorkey {
 enum ParamID : A_long {
     PARAM_INPUT = 0,    // Reserved: default input layer
 
-    // Registered params (M1)
+    // Registered params
     PARAM_OUTPUT_MODE,          // Processed / Matte / Foreground / Composite
+    PARAM_ALPHA_HINT_LAYER,     // Layer: external alpha matte input
     PARAM_DEVICE,               // Auto / CPU / GPU
     PARAM_QUALITY_MODE,         // Quality / Performance
     PARAM_LOW_MEMORY_MODE,
