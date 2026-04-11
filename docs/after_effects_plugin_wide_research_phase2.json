@@ -1,0 +1,70 @@
+{
+  "results": [
+    {
+      "input": "https://ae-plugins.docsforadobe.dev/intro/sample-projects/",
+      "output": {
+        "researched_item": "https://ae-plugins.docsforadobe.dev/intro/sample-projects/",
+        "foundation_value": "This source offers a valuable foundation for understanding After Effects plugin development, particularly with its C++ sample projects and explicit mention of 'Skeleton' as a starting point. The samples cover diverse plugin types and demonstrate core API features, making it suitable for learning and initial boilerplate creation.",
+        "architecture_and_build_notes": "The documentation primarily demonstrates C++ for plugin development, with a legacy C sample. Build systems are Xcode for macOS (`Buildall.xcodeproj`) and Visual Studio for Windows (`BuildAll.sln`). Packaging involves placing compiled plugins into specific Adobe Common Plug-ins directories, with versioning locked at 7.0 for CC versions. It also recommends using the HTML5 Panel SDK for modern UI panels.",
+        "risks_or_gaps": "While comprehensive, some samples are in C and rely on older API features, which might not align with modern development practices. The document also notes hardcoded paths in `Projector.h`, requiring manual adjustment. For UI, it explicitly recommends the HTML5 Panel SDK over the C++ panel creation method, indicating a potential gap in modern C++ UI examples.",
+        "priority_sources": "https://ae-plugins.docsforadobe.dev/intro/sample-projects/;https://ae-plugins.docsforadobe.dev/intro/where-installers-should-put-plug-ins/"
+      },
+      "error": ""
+    },
+    {
+      "input": "https://ae-plugins.docsforadobe.dev/print_page/",
+      "output": {
+        "researched_item": "https://ae-plugins.docsforadobe.dev/print_page/",
+        "foundation_value": "This documentation, coupled with its referenced SDK sample projects, serves as a highly valuable foundation for developing modern cross-platform After Effects plugins. It provides detailed architectural guidance and practical examples for implementation.",
+        "architecture_and_build_notes": "Modern After Effects plugin architecture primarily uses C++ and supports various plugin types including Effects, AEGPs, AEIOs, and Artisans. Cross-platform development is supported for macOS (including Apple Silicon) and Windows (including Arm). Build systems include Xcode for macOS and Visual Studio for Windows, with specific tools like pipltool.exe and cnvtpipl.exe for handling cross-platform resource files.",
+        "risks_or_gaps": "The documentation itself is a guide and not a direct boilerplate; actual sample projects are within the SDK, which needs to be downloaded separately. While it details cross-platform considerations, specific build scripts or comprehensive CMake/Meson examples are not explicitly provided within the guide, requiring developers to adapt from Xcode/Visual Studio project files.",
+        "priority_sources": "https://ae-plugins.docsforadobe.dev/print_page/;https://github.com/docsforadobe/after-effects-plugin-guide/;https://www.adobe.io/after-effects/"
+      },
+      "error": ""
+    },
+    {
+      "input": "https://github.com/sameobake/aex-with-cmake",
+      "output": {
+        "researched_item": "https://github.com/sameobake/aex-with-cmake",
+        "foundation_value": "This source is highly valuable as a foundation for a real project. The repository explicitly states its purpose is to serve as a template for creating After Effects plugins with CMake, addressing the common issue of SDK samples relying on Visual Studio.",
+        "architecture_and_build_notes": "This repository demonstrates building After Effects plugins using C++ and the After Effects SDK, leveraging CMake as the build system. It includes conditional compilation for Windows and Apple platforms, aiming for cross-platform compatibility. The build process generates a .aex plugin file on Windows and handles basic packaging by installing it to the After Effects plugin directory.",
+        "risks_or_gaps": "The project's environment requirements are specific to tested versions of After Effects, CLion, CMake, Visual Studio, and MSVC, which may lead to compatibility issues with other setups. The installation path for plugins is hardcoded for Windows, and the Apple-specific installation logic is currently absent, indicating incomplete cross-platform deployment. As a 'Skeleton' project, it may lack advanced features or robust error handling for production use.",
+        "priority_sources": "https://github.com/sameobake/aex-with-cmake;https://github.com/Wunkolo/Vulkanator;https://github.com/Gorialis/aftereffects_spatial_media_plugins;https://idom.me/articles/851.html;https://community.adobe.com/t5/after-effects-discussions/any-examples-for-building-ae-plugins-on-osx-with-cmake/m-p/8399527"
+      },
+      "error": ""
+    },
+    {
+      "input": "https://github.com/mobile-bungalow/after_effects_cmake",
+      "output": {
+        "researched_item": "https://github.com/mobile-bungalow/after_effects_cmake",
+        "foundation_value": "This repository provides a robust CMake-based build system tailored for the Adobe After Effects SDK's Skeleton example, making it an excellent foundation for developing modern open-source cross-platform plugins. Its support for both macOS and Windows, along with command-line and IDE integration, streamlines the development and CI/CD processes.",
+        "architecture_and_build_notes": "The project demonstrates a modular C++11 plugin architecture, utilizing the official Adobe After Effects SDK. It employs CMake as the build system, supporting Xcode for macOS and Visual Studio/MSBuild for Windows. Packaging involves generating `.plugin` bundles for macOS, complete with PiPL resources and PkgInfo, and `.aex` files for Windows, using PiPLtool.exe for resource compilation.",
+        "risks_or_gaps": "While providing a solid build foundation, this project is based on the basic 'Skeleton' example, meaning it may lack advanced features or configurations required for complex plugins. The `CMakeLists.txt` also highlights the need to handle legacy Adobe resource formats, which could introduce additional complexity or maintenance overhead. Further customization would be necessary for specific plugin types beyond the basic example.",
+        "priority_sources": "https://github.com/mobile-bungalow/after_effects_cmake;https://github.com/mobile-bungalow/after_effects_cmake/blob/main/ReadMe.md;https://github.com/mobile-bungalow/after_effects_cmake/blob/main/CMakeLists.txt"
+      },
+      "error": ""
+    },
+    {
+      "input": "https://github.com/Trentonom0r3/AETK",
+      "output": {
+        "researched_item": "https://github.com/Trentonom0r3/AETK",
+        "foundation_value": "AETK appears to be a moderately useful foundation for an open-source cross-platform After Effects plugin. Its object-oriented C++ design and abstraction of the AE SDK could streamline development, especially for newcomers. However, the lack of recent activity and comprehensive documentation are significant drawbacks.",
+        "architecture_and_build_notes": "AETK is a C++ framework for After Effects General Purpose (AEGP) plugins, leveraging modern C++ features and abstracting the After Effects SDK. It uses a Visual Studio solution (`.sln`, `.vcxproj`) for Windows development, and the presence of `CMakeLists.txt` files, particularly within dependencies like `glbinding`, suggests a potential for cross-platform compilation, though this is not explicitly detailed for the main project. Python is also present (2.6%), indicating possible Python bindings or scripting integration.",
+        "risks_or_gaps": "A significant risk is the lack of up-to-date and accessible documentation, as the provided PDF link is broken. The repository shows limited activity (last commit 2 years ago, 0 forks, 14 stars) and no published releases, which raises concerns about ongoing support and stability. While CMake files suggest cross-platform intent, explicit build instructions for macOS/Linux are not immediately apparent, and the primary build system appears to be Visual Studio, potentially limiting its cross-platform utility without further effort.",
+        "priority_sources": "https://github.com/Trentonom0r3/AETK; AETK/README.md; https://github.com/Trentonom0r3/AETK/tree/main/AEGP/Skeleton; https://github.com/Trentonom0r3/AETK/tree/main/AEGP/Grabba; https://github.com/Trentonom0r3/AETK/tree/main/AEGP/LayerDumper; https://github.com/Trentonom0r3/AETK/tree/main/AEGP/TaskScheduler; AETK/AETK.sln; AETK/AETK.vcxproj"
+      },
+      "error": ""
+    },
+    {
+      "input": "High-level current best practices for cross-platform Adobe After Effects plugin build, packaging, and distribution on macOS and Windows",
+      "output": {
+        "researched_item": "hyperbrew/bolt-uxp GitHub repository: A lightning-fast boilerplate for building Adobe UXP Plugins in Svelte, React, or Vue built on Vite + TypeScript + Sass",
+        "foundation_value": "This repository offers a highly valuable foundation for developing modern cross-platform After Effects plugins. It provides a complete boilerplate with hot-reloading, multi-host app configuration, optimized build sizes, and simplified publishing and packaging for distribution, significantly streamlining the development workflow.",
+        "architecture_and_build_notes": "The boilerplate supports building Adobe UXP Plugins using modern web technologies like Svelte, React, or Vue, integrated with Vite, TypeScript, and Sass. It features a multi-host-app configuration and supports hybrid C++ plugins for performance-critical tasks, which are compiled with Xcode for macOS (x64 and arm64) and Visual Studio 2019 for Windows (x64). Packaging is handled by generating CCX files for distribution, with an option to bundle assets into a ZIP archive.",
+        "risks_or_gaps": "A primary risk is that hybrid C++ plugins are currently only supported in Photoshop, not After Effects. Additionally, while the boilerplate handles signing and notarization for macOS and Windows, modifications to the C++ source code require developers to manage their own certificates. The Webview UI is still in beta, and its complexity might be a barrier for new UXP developers.",
+        "priority_sources": "https://github.com/hyperbrew/bolt-uxp; https://developer.adobe.com/photoshop/uxp/2022/guides/hybrid-plugins/; https://developer.adobe.com/photoshop/uxp/2022/; https://aescripts.com/learn/zxp-installer/; https://hyperbrew.co/resources/bolt-uxp"
+      },
+      "error": ""
+    }
+  ]
+}

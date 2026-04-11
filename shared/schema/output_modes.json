@@ -1,0 +1,17 @@
+{
+  "output_modes": [
+    {"id": 0, "name": "Processed", "description": "Clean keyed result"},
+    {"id": 1, "name": "Matte", "description": "Alpha channel only (grayscale)"},
+    {"id": 2, "name": "Foreground", "description": "Extracted subject with transparency"},
+    {"id": 3, "name": "Composite", "description": "Composited result over background"}
+  ],
+  "device_modes": [
+    {"id": 0, "name": "Auto", "description": "Automatically select best device"},
+    {"id": 1, "name": "CPU", "description": "CPU-only inference"},
+    {"id": 2, "name": "GPU", "description": "GPU inference (CUDA/MPS/MLX)"}
+  ],
+  "quality_modes": [
+    {"id": 0, "name": "Quality", "description": "Full resolution, no tiling shortcuts"},
+    {"id": 1, "name": "Performance", "description": "Optimized for speed, may reduce quality"}
+  ]
+}

@@ -1,0 +1,88 @@
+# =======================
+# CorridorKey AE .gitignore
+# =======================
+
+# --- Build artifacts ---
+build/
+cmake-build-*/
+out/
+*.aex
+*.plugin
+*.obj
+*.o
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exp
+*.pdb
+*.ilk
+*.dSYM/
+
+# --- IDE / Editor ---
+.vscode/
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+.idea/
+*.xcodeproj/
+*.xcworkspace/
+*.sln
+*.suo
+*.vcxproj.user
+*.vs/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+
+# --- Python (runtime) ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+*.whl
+.venv/
+venv/
+env/
+.env
+.env.local
+*.log
+
+# --- PyTorch / ML models ---
+*.pt
+*.pth
+*.onnx
+*.bin
+*.safetensors
+models/weights/
+
+# --- Adobe After Effects SDK ---
+# The SDK itself should not be committed
+ae_sdk/
+Adobe_After_Effects_SDK/
+
+# --- Package / Release ---
+release/
+*.zip
+*.tar.gz
+*.dmg
+*.pkg
+*.msi
+*.exe
+
+# --- Misc ---
+*.bak
+*.tmp
+*.cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+node_modules/
