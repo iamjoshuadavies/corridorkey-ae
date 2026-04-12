@@ -13,6 +13,16 @@ A_Err SetupParams(PF_InData* in_data, PF_OutData* out_data)
     PF_Err err = PF_Err_NONE;
     PF_ParamDef def;
 
+    // --- About button (branding) ---
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_BUTTON(
+        "CorridorKey",
+        "About",
+        0,                          // PUI flags
+        PF_ParamFlag_SUPERVISE,     // Call us on click
+        PARAM_ABOUT_BUTTON
+    );
+
     // --- Output Mode ---
     AEFX_CLR_STRUCT(def);
     PF_ADD_POPUP(

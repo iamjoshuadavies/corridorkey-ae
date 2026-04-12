@@ -15,6 +15,9 @@ namespace corridorkey {
 enum ParamID : A_long {
     PARAM_INPUT = 0,    // Reserved: default input layer
 
+    // Branding
+    PARAM_ABOUT_BUTTON,         // "CorridorKey" label + "About" button
+
     // Registered params
     PARAM_OUTPUT_MODE,          // Processed / Matte / Foreground / Composite
     PARAM_ALPHA_HINT_LAYER,     // Layer: external alpha matte input

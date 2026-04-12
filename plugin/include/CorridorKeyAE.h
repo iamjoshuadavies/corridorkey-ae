@@ -84,5 +84,6 @@ namespace corridorkey {
     A_Err HandleSequenceSetup(PF_InData* in_data, PF_OutData* out_data);
     A_Err HandleSequenceSetdown(PF_InData* in_data, PF_OutData* out_data);
     A_Err HandleRender(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_LayerDef* output);
+    A_Err HandleUserChangedParam(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_UserChangedParamExtra* extra);
 
 } // namespace corridorkey

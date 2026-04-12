@@ -83,6 +83,11 @@ EffectMain(
                 err = corridorkey::HandleRender(in_data, out_data, params, output);
                 break;
 
+            case PF_Cmd_USER_CHANGED_PARAM:
+                err = corridorkey::HandleUserChangedParam(in_data, out_data, params,
+                    reinterpret_cast<PF_UserChangedParamExtra*>(extra));
+                break;
+
             case PF_Cmd_SMART_PRE_RENDER:
                 err = corridorkey::SmartPreRender(in_data, out_data,
                     reinterpret_cast<PF_PreRenderExtra*>(extra));
@@ -175,6 +180,24 @@ A_Err HandleSequenceSetdown(PF_InData* in_data, PF_OutData* out_data)
 A_Err HandleRender(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_LayerDef* output)
 {
     return RenderEffect(in_data, out_data, params, output);
+}
+
+A_Err HandleUserChangedParam(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_UserChangedParamExtra* extra)
+{
+#if AE_SDK_AVAILABLE
+    if (extra->param_index == PARAM_ABOUT_BUTTON) {
+        PF_SPRINTF(out_data->return_msg,
+            "CorridorKey v%s\n\n"
+            "Advanced green-screen keying for After Effects.\n"
+            "Physically accurate foreground/background unmixing\n"
+            "powered by MLX on Apple Silicon.\n\n"
+            "Based on CorridorKey by Niko Pueringer / Corridor Digital.",
+            CK_VERSION_STRING
+        );
+        out_data->out_flags |= PF_OutFlag_DISPLAY_ERROR_MESSAGE;
+    }
+#endif
+    return PF_Err_NONE;
 }
 
 } // namespace corridorkey
