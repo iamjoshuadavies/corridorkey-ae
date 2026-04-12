@@ -191,8 +191,20 @@ struct RuntimeBridge::Impl {
         return repo_root;
     }
 
+    void KillExistingRuntimes() {
+#ifndef _WIN32
+        // Kill any orphaned runtime processes from previous sessions
+        // Uses pkill to find processes matching our server.main pattern
+        system("pkill -f 'server.main --port' 2>/dev/null");
+        usleep(100000); // 100ms for processes to die
+#endif
+    }
+
     bool LaunchRuntime() {
 #ifndef _WIN32
+        // Clean up any zombies from previous AE sessions
+        KillExistingRuntimes();
+
         std::string root = FindRepoRoot();
         if (root.empty()) return false;
 
@@ -234,7 +246,7 @@ struct RuntimeBridge::Impl {
             // Exec the runtime server
             execl(python.c_str(), "python3", "-m", "server.main",
                   "--port", "0", // Auto-assign port
-                  "--img-size", "2048",
+                  "--img-size", "512",
                   nullptr);
 
             // If exec failed

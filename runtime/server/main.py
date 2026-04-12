@@ -18,7 +18,7 @@ from server.hardware import detect_hardware
 logger = logging.getLogger("corridorkey.runtime")
 
 
-def create_engine(model_path: Optional[str] = None, img_size: int = 2048) -> Optional[InferenceEngine]:
+def create_engine(model_path: Optional[str] = None, img_size: int = 512) -> Optional[InferenceEngine]:
     """Create and load the best available inference engine."""
 
     # Try MLX first (Apple Silicon)
@@ -54,7 +54,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=0, help="TCP port (0 = auto-assign)")
     parser.add_argument("--socket", type=str, default=None, help="Unix domain socket path")
     parser.add_argument("--model", type=str, default=None, help="Path to model weights")
-    parser.add_argument("--img-size", type=int, default=2048, help="Model input resolution (512=fast, 2048=quality)")
+    parser.add_argument("--img-size", type=int, default=512, help="Model internal resolution (512=fast/M1, 1024/2048=quality/needs GPU)")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
 
