@@ -30,6 +30,12 @@ set(PLUGIN_SOURCES
     src/CorridorKeyAE_Bridge.cpp
 )
 
+# SDK utility sources needed for smart render
+set(SDK_UTIL_SOURCES)
+if(AE_SDK_FOUND)
+    list(APPEND SDK_UTIL_SOURCES "${AE_SDK_PATH}/Util/Smart_Utils.cpp")
+endif()
+
 set(PLUGIN_HEADERS
     include/CorridorKeyAE.h
     include/CorridorKeyAE_Params.h
@@ -41,7 +47,7 @@ set(PLUGIN_HEADERS
 # --- Build target ---
 if(APPLE)
     # macOS: Build as a .plugin bundle (Universal Binary)
-    add_library(CorridorKeyAE MODULE ${PLUGIN_SOURCES} ${PLUGIN_HEADERS})
+    add_library(CorridorKeyAE MODULE ${PLUGIN_SOURCES} ${PLUGIN_HEADERS} ${SDK_UTIL_SOURCES})
 
     set_target_properties(CorridorKeyAE PROPERTIES
         BUNDLE TRUE

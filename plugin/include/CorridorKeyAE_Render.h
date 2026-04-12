@@ -10,16 +10,33 @@
 namespace corridorkey {
 
 /**
- * Main render handler. Extracts the input frame, sends it to the
- * runtime bridge for inference, and writes the result to the output layer.
- *
- * Fallback: stamps diagnostic text overlay when bridge is not connected.
+ * Basic render handler (8bpc and 16bpc).
  */
 A_Err RenderEffect(
     PF_InData*      in_data,
     PF_OutData*     out_data,
     PF_ParamDef*    params[],
     PF_LayerDef*    output
+);
+
+/**
+ * Smart Pre-Render: declare input requirements and output rect.
+ * Required for 32bpc float support.
+ */
+A_Err SmartPreRender(
+    PF_InData*          in_data,
+    PF_OutData*         out_data,
+    PF_PreRenderExtra*  extra
+);
+
+/**
+ * Smart Render: process pixels using checked-out buffers.
+ * Supports 8bpc, 16bpc, and 32bpc float.
+ */
+A_Err SmartRender(
+    PF_InData*              in_data,
+    PF_OutData*             out_data,
+    PF_SmartRenderExtra*    extra
 );
 
 #if AE_SDK_AVAILABLE

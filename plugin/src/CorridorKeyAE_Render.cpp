@@ -7,6 +7,10 @@
 #include "CorridorKeyAE_Params.h"
 #include "CorridorKeyAE_Bridge.h"
 
+#if AE_SDK_AVAILABLE
+#include "Smart_Utils.h"
+#endif
+
 namespace corridorkey {
 
 // =============================================================================
@@ -374,5 +378,174 @@ A_Err RenderEffect(
     return PF_Err_NONE;
 #endif
 }
+
+// =============================================================================
+// Smart Render (required for 32bpc float support)
+// =============================================================================
+
+#if AE_SDK_AVAILABLE
+
+// Checkout ID for the main input layer
+constexpr A_long CK_INPUT_CHECKOUT_ID = 0;
+constexpr A_long CK_HINT_CHECKOUT_ID  = 1;
+
+A_Err SmartPreRender(
+    PF_InData*          in_data,
+    PF_OutData*         out_data,
+    PF_PreRenderExtra*  extra)
+{
+    PF_Err err = PF_Err_NONE;
+
+    // Request the input layer
+    PF_RenderRequest req = extra->input->output_request;
+    req.preserve_rgb_of_zero_alpha = TRUE;
+
+    PF_CheckoutResult in_result;
+    ERR(extra->cb->checkout_layer(
+        in_data->effect_ref,
+        CK_INPUT_CHECKOUT_ID,   // param index
+        CK_INPUT_CHECKOUT_ID,   // checkout ID
+        &req,
+        in_data->current_time,
+        in_data->time_step,
+        in_data->time_scale,
+        &in_result));
+
+    // Set output rects from input
+    if (!err) {
+        UnionLRect(&in_result.result_rect,     &extra->output->result_rect);
+        UnionLRect(&in_result.max_result_rect,  &extra->output->max_result_rect);
+    }
+
+    // Also request the alpha hint layer (if it will be available)
+    // Note: we can't check the param value during pre-render, so just request it
+    PF_CheckoutResult hint_result;
+    extra->cb->checkout_layer(
+        in_data->effect_ref,
+        PARAM_ALPHA_HINT_LAYER,
+        CK_HINT_CHECKOUT_ID,
+        &req,
+        in_data->current_time,
+        in_data->time_step,
+        in_data->time_scale,
+        &hint_result);
+    // Ignore hint checkout errors — it's optional
+
+    return err;
+}
+
+A_Err SmartRender(
+    PF_InData*              in_data,
+    PF_OutData*             out_data,
+    PF_SmartRenderExtra*    extra)
+{
+    PF_Err err = PF_Err_NONE;
+    PF_Err err2 = PF_Err_NONE;
+
+    PF_EffectWorld* input_world = nullptr;
+    PF_EffectWorld* output_world = nullptr;
+
+    // Checkout pixel buffers
+    ERR(extra->cb->checkout_layer_pixels(in_data->effect_ref, CK_INPUT_CHECKOUT_ID, &input_world));
+    ERR(extra->cb->checkout_output(in_data->effect_ref, &output_world));
+
+    if (err || !input_world || !output_world) return err;
+
+    int bpp = DetectBytesPerPixel(input_world);
+
+    // Try bridge connection
+    bool bridge_ok = g_bridge.EnsureConnected();
+
+    if (bridge_ok) {
+        // Build request from input pixels
+        FrameRequest request;
+        request.width = input_world->width;
+        request.height = input_world->height;
+        request.pixel_data = ConvertTo8bpc(input_world, bpp);
+        request.rowbytes = input_world->width * 4;
+
+        // Read effect params
+        PF_ParamDef mode_param, despill_param, despeckle_param, refiner_param, cleanup_param;
+        AEFX_CLR_STRUCT(mode_param);
+        AEFX_CLR_STRUCT(despill_param);
+        AEFX_CLR_STRUCT(despeckle_param);
+        AEFX_CLR_STRUCT(refiner_param);
+        AEFX_CLR_STRUCT(cleanup_param);
+
+        ERR(PF_CHECKOUT_PARAM(in_data, PARAM_OUTPUT_MODE, in_data->current_time,
+                              in_data->time_step, in_data->time_scale, &mode_param));
+        ERR(PF_CHECKOUT_PARAM(in_data, PARAM_DESPILL_STRENGTH, in_data->current_time,
+                              in_data->time_step, in_data->time_scale, &despill_param));
+        ERR(PF_CHECKOUT_PARAM(in_data, PARAM_DESPECKLE_STRENGTH, in_data->current_time,
+                              in_data->time_step, in_data->time_scale, &despeckle_param));
+        ERR(PF_CHECKOUT_PARAM(in_data, PARAM_REFINER_STRENGTH, in_data->current_time,
+                              in_data->time_step, in_data->time_scale, &refiner_param));
+        ERR(PF_CHECKOUT_PARAM(in_data, PARAM_MATTE_CLEANUP, in_data->current_time,
+                              in_data->time_step, in_data->time_scale, &cleanup_param));
+
+        if (!err) {
+            request.output_mode = mode_param.u.pd.value - 1;
+            request.despill = despill_param.u.fs_d.value;
+            request.despeckle = despeckle_param.u.fs_d.value;
+            request.refiner = refiner_param.u.fs_d.value;
+            request.matte_cleanup = cleanup_param.u.fs_d.value;
+        }
+
+        ERR2(PF_CHECKIN_PARAM(in_data, &mode_param));
+        ERR2(PF_CHECKIN_PARAM(in_data, &despill_param));
+        ERR2(PF_CHECKIN_PARAM(in_data, &despeckle_param));
+        ERR2(PF_CHECKIN_PARAM(in_data, &refiner_param));
+        ERR2(PF_CHECKIN_PARAM(in_data, &cleanup_param));
+
+        // Try to checkout alpha hint pixels
+        PF_EffectWorld* hint_world = nullptr;
+        extra->cb->checkout_layer_pixels(in_data->effect_ref, CK_HINT_CHECKOUT_ID, &hint_world);
+        if (hint_world && hint_world->data) {
+            int hint_bpp = DetectBytesPerPixel(hint_world);
+            request.has_alpha_hint = true;
+            request.hint_width = hint_world->width;
+            request.hint_height = hint_world->height;
+            request.hint_pixel_data = ConvertTo8bpc(hint_world, hint_bpp);
+            request.hint_rowbytes = hint_world->width * 4;
+        }
+
+        // Process through bridge
+        FrameResponse response;
+        if (!err && g_bridge.ProcessFrame(request, response) && response.success) {
+            size_t expected = static_cast<size_t>(output_world->width) * output_world->height * 4;
+            if (response.pixel_data.size() >= expected) {
+                WriteFrom8bpc(output_world, response.pixel_data.data(), bpp);
+            }
+        } else {
+            // Error fallback: copy input to output
+            if (input_world->width == output_world->width &&
+                input_world->height == output_world->height) {
+                for (int y = 0; y < output_world->height; y++) {
+                    memcpy(
+                        reinterpret_cast<char*>(output_world->data) + y * output_world->rowbytes,
+                        reinterpret_cast<char*>(input_world->data) + y * input_world->rowbytes,
+                        output_world->rowbytes
+                    );
+                }
+            }
+        }
+    } else {
+        // Bridge offline: copy input to output (passthrough)
+        if (input_world->width == output_world->width &&
+            input_world->height == output_world->height) {
+            for (int y = 0; y < output_world->height; y++) {
+                memcpy(
+                    reinterpret_cast<char*>(output_world->data) + y * output_world->rowbytes,
+                    reinterpret_cast<char*>(input_world->data) + y * input_world->rowbytes,
+                    output_world->rowbytes
+                );
+            }
+        }
+    }
+
+    return err;
+}
+
+#endif // AE_SDK_AVAILABLE
 
 } // namespace corridorkey
