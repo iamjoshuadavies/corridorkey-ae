@@ -227,10 +227,10 @@ static PF_Err ClickEvent(
         my >= about_top && my <= about_bottom) {
         PF_SPRINTF(out_data->return_msg,
             "CorridorKey v%s\n\n"
-            "Advanced green-screen keying for After Effects.\n"
+            "Based on the green-screen keying technique created by\n"
+            "Niko Pueringer of Corridor Digital (youtube.com/CorridorCrew).\n\n"
             "Physically accurate foreground/background unmixing\n"
-            "powered by MLX on Apple Silicon.\n\n"
-            "Based on CorridorKey by Niko Pueringer / Corridor Digital.",
+            "powered by MLX on Apple Silicon.",
             CK_VERSION_STRING
         );
         out_data->out_flags |= PF_OutFlag_DISPLAY_ERROR_MESSAGE;
