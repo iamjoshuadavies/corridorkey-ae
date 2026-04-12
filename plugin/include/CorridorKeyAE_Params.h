@@ -47,10 +47,13 @@ enum class DeviceMode : A_long {
     GPU,
 };
 
-// --- Quality modes ---
+// --- Quality modes (model tile/resolution) ---
+// Values are 1-indexed for AE popup (subtract 1 for actual index)
 enum class QualityMode : A_long {
-    Quality = 0,
-    Performance,
+    Tiled512 = 0,       // Full-res tiled (default, ~5s/frame 1080p)
+    Direct512,          // Downscale to 512, fast (~0.3s)
+    Direct256,          // Downscale to 256, fastest
+    Direct1024,         // Downscale to 1024 (slower)
 };
 
 // --- Alpha modes ---

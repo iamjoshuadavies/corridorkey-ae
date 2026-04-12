@@ -469,8 +469,9 @@ A_Err SmartRender(
         request.rowbytes = input_world->width * 4;
 
         // Read effect params
-        PF_ParamDef mode_param, despill_param, despeckle_param, refiner_param, cleanup_param;
+        PF_ParamDef mode_param, quality_param, despill_param, despeckle_param, refiner_param, cleanup_param;
         AEFX_CLR_STRUCT(mode_param);
+        AEFX_CLR_STRUCT(quality_param);
         AEFX_CLR_STRUCT(despill_param);
         AEFX_CLR_STRUCT(despeckle_param);
         AEFX_CLR_STRUCT(refiner_param);
@@ -478,6 +479,8 @@ A_Err SmartRender(
 
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_OUTPUT_MODE, in_data->current_time,
                               in_data->time_step, in_data->time_scale, &mode_param));
+        ERR(PF_CHECKOUT_PARAM(in_data, PARAM_QUALITY_MODE, in_data->current_time,
+                              in_data->time_step, in_data->time_scale, &quality_param));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_DESPILL_STRENGTH, in_data->current_time,
                               in_data->time_step, in_data->time_scale, &despill_param));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_DESPECKLE_STRENGTH, in_data->current_time,
@@ -489,6 +492,7 @@ A_Err SmartRender(
 
         if (!err) {
             request.output_mode = mode_param.u.pd.value - 1;
+            request.quality_mode = quality_param.u.pd.value - 1;  // 0=tiled512, 1=512, 2=256, 3=1024
             request.despill = despill_param.u.fs_d.value;
             request.despeckle = despeckle_param.u.fs_d.value;
             request.refiner = refiner_param.u.fs_d.value;
@@ -496,6 +500,7 @@ A_Err SmartRender(
         }
 
         ERR2(PF_CHECKIN_PARAM(in_data, &mode_param));
+        ERR2(PF_CHECKIN_PARAM(in_data, &quality_param));
         ERR2(PF_CHECKIN_PARAM(in_data, &despill_param));
         ERR2(PF_CHECKIN_PARAM(in_data, &despeckle_param));
         ERR2(PF_CHECKIN_PARAM(in_data, &refiner_param));

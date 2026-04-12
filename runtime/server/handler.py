@@ -45,9 +45,10 @@ class FrameCache:
         output_mode: int, despill: float, despeckle: float,
         refiner: float, matte_cleanup: float,
         hint_hash: Optional[str] = None,
+        quality_mode: int = 0,
     ) -> str:
         """Build a cache key from frame dimensions, content hash, and params."""
-        parts = f"{width}:{height}:{pixel_hash}:{output_mode}:"
+        parts = f"{width}:{height}:{pixel_hash}:{output_mode}:{quality_mode}:"
         parts += f"{despill:.3f}:{despeckle:.3f}:{refiner:.3f}:{matte_cleanup:.3f}"
         if hint_hash:
             parts += f":{hint_hash}"
@@ -70,10 +71,11 @@ class FrameCache:
         output_mode: int, despill: float, despeckle: float,
         refiner: float, matte_cleanup: float,
         hint_hash: Optional[str] = None,
+        quality_mode: int = 0,
     ) -> Optional[bytes]:
         key = self._make_key(
             width, height, pixel_hash, output_mode,
-            despill, despeckle, refiner, matte_cleanup, hint_hash,
+            despill, despeckle, refiner, matte_cleanup, hint_hash, quality_mode,
         )
         if key in self._cache:
             self._hits += 1
@@ -88,10 +90,11 @@ class FrameCache:
         refiner: float, matte_cleanup: float,
         response: bytes,
         hint_hash: Optional[str] = None,
+        quality_mode: int = 0,
     ) -> None:
         key = self._make_key(
             width, height, pixel_hash, output_mode,
-            despill, despeckle, refiner, matte_cleanup, hint_hash,
+            despill, despeckle, refiner, matte_cleanup, hint_hash, quality_mode,
         )
         entry_size = len(response)
 
@@ -121,7 +124,7 @@ class FrameCache:
 #   + has_hint(1) + [hint_width(4) + hint_height(4) + hint_rowbytes(4)]
 #   + pixel_data + [hint_pixel_data]
 FRAME_MAGIC = b"FRAME"
-FRAME_HEADER_BASE = 5 + 4 + 4 + 4 + 1 + 4 + 4 + 4 + 4 + 1  # 39 bytes
+FRAME_HEADER_BASE = 5 + 4 + 4 + 4 + 1 + 4 + 4 + 4 + 4 + 1 + 1  # 40 bytes
 # Legacy header without params (M2 compat)
 FRAME_HEADER_SIZE_LEGACY = 5 + 4 + 4 + 4  # 17 bytes
 
@@ -209,9 +212,10 @@ class RequestHandler:
             despeckle = struct.unpack(">f", data[22:26])[0]
             refiner = struct.unpack(">f", data[26:30])[0]
             matte_cleanup = struct.unpack(">f", data[30:34])[0]
-            has_hint = data[34] != 0
+            quality_mode = data[34]  # 0=tiled512, 1=512, 2=256, 3=1024
+            has_hint = data[35] != 0
 
-            offset = 35
+            offset = 36
             if has_hint:
                 hint_width = struct.unpack(">I", data[offset:offset+4])[0]
                 hint_height = struct.unpack(">I", data[offset+4:offset+8])[0]
@@ -235,8 +239,12 @@ class RequestHandler:
             matte_cleanup = 0.0
             pixel_data = data[FRAME_HEADER_SIZE_LEGACY:]
 
-        logger.info("Frame %dx%d mode=%d (despill=%.2f refiner=%.2f hint=%s)",
-                     width, height, output_mode, despill, refiner,
+        # Quality mode names for logging
+        quality_names = {0: "tiled512", 1: "512", 2: "256", 3: "1024"}
+        logger.info("Frame %dx%d mode=%d quality=%s (despill=%.2f refiner=%.2f hint=%s)",
+                     width, height, output_mode,
+                     quality_names.get(quality_mode, "?"),
+                     despill, refiner,
                      f"{hint_width}x{hint_height}" if hint_data else "none")
 
         self._frame_count += 1
@@ -247,7 +255,7 @@ class RequestHandler:
 
         cached = self._cache.get(
             width, height, pixel_hash, output_mode,
-            despill, despeckle, refiner, matte_cleanup, hint_hash,
+            despill, despeckle, refiner, matte_cleanup, hint_hash, quality_mode,
         )
         if cached is not None:
             logger.info("Cache HIT (%s)", self._cache.stats["hit_rate"])
@@ -258,14 +266,14 @@ class RequestHandler:
             result = self._process_with_engine(
                 width, height, rowbytes, pixel_data,
                 output_mode, despill, despeckle, refiner, matte_cleanup,
-                hint_data, hint_width, hint_height, hint_rowbytes,
+                hint_data, hint_width, hint_height, hint_rowbytes, quality_mode,
             )
             # Cache successful results (don't cache errors)
             if result[:5] == FRAME_MAGIC:
                 self._cache.put(
                     width, height, pixel_hash, output_mode,
                     despill, despeckle, refiner, matte_cleanup,
-                    result, hint_hash,
+                    result, hint_hash, quality_mode,
                 )
                 logger.info("Cached frame (%d entries, %s)",
                              self._cache.stats["entries"],
@@ -288,6 +296,7 @@ class RequestHandler:
         refiner: float, matte_cleanup: float,
         hint_data: Optional[bytes] = None,
         hint_width: int = 0, hint_height: int = 0, hint_rowbytes: int = 0,
+        quality_mode: int = 0,
     ) -> bytes:
         """Process a frame through the real inference engine."""
         try:
@@ -298,6 +307,31 @@ class RequestHandler:
             else:
                 full = raw.reshape((height, rowbytes))
                 argb = full[:, :width * 4].reshape((height, width, 4))
+
+            # Quality mode scaling for non-tiled modes
+            # 0 = tiled (full res, handled by engine), 1 = 512, 2 = 256, 3 = 1024
+            original_h, original_w = height, width
+            target_size = {1: 512, 2: 256, 3: 1024}.get(quality_mode)
+
+            if target_size and (width > target_size or height > target_size):
+                # Downscale preserving aspect ratio
+                scale = target_size / max(width, height)
+                new_w = max(1, int(width * scale))
+                new_h = max(1, int(height * scale))
+                from PIL import Image as _PILImg
+                # ARGB → RGBA for PIL
+                rgba = np.zeros_like(argb)
+                rgba[:, :, 0] = argb[:, :, 1]; rgba[:, :, 1] = argb[:, :, 2]
+                rgba[:, :, 2] = argb[:, :, 3]; rgba[:, :, 3] = argb[:, :, 0]
+                pil_img = _PILImg.fromarray(rgba, "RGBA").resize(
+                    (new_w, new_h), _PILImg.Resampling.BILINEAR)
+                rgba_small = np.array(pil_img)
+                # RGBA → ARGB
+                argb = np.zeros((new_h, new_w, 4), dtype=np.uint8)
+                argb[:, :, 0] = rgba_small[:, :, 3]; argb[:, :, 1] = rgba_small[:, :, 0]
+                argb[:, :, 2] = rgba_small[:, :, 1]; argb[:, :, 3] = rgba_small[:, :, 2]
+                logger.info("Downscaled %dx%d → %dx%d (quality mode %d)",
+                             original_w, original_h, new_w, new_h, quality_mode)
 
             # Parse alpha hint if provided
             alpha_hint_image: Optional[np.ndarray] = None
@@ -345,21 +379,33 @@ class RequestHandler:
 
             logger.info("Inference complete in %.1fms", elapsed_ms)
 
-            # Convert output (H, W, 4) ARGB back to padded pixel data
+            # Upscale result back to original size if we downscaled
             output_argb = result.image
-            if rowbytes == width * 4:
-                out_pixels = output_argb.tobytes()
-            else:
-                padded = np.zeros((height, rowbytes), dtype=np.uint8)
-                padded[:, :width * 4] = output_argb.reshape((height, width * 4))
-                out_pixels = padded.tobytes()
+            if target_size and (original_w != output_argb.shape[1] or original_h != output_argb.shape[0]):
+                from PIL import Image as _PILImg
+                # ARGB → RGBA for PIL
+                out_rgba = np.zeros_like(output_argb)
+                out_rgba[:, :, 0] = output_argb[:, :, 1]; out_rgba[:, :, 1] = output_argb[:, :, 2]
+                out_rgba[:, :, 2] = output_argb[:, :, 3]; out_rgba[:, :, 3] = output_argb[:, :, 0]
+                pil_out = _PILImg.fromarray(out_rgba, "RGBA").resize(
+                    (original_w, original_h), _PILImg.Resampling.BILINEAR)
+                out_rgba = np.array(pil_out)
+                # RGBA → ARGB
+                output_argb = np.zeros((original_h, original_w, 4), dtype=np.uint8)
+                output_argb[:, :, 0] = out_rgba[:, :, 3]; output_argb[:, :, 1] = out_rgba[:, :, 0]
+                output_argb[:, :, 2] = out_rgba[:, :, 1]; output_argb[:, :, 3] = out_rgba[:, :, 2]
+
+            # Convert output (H, W, 4) ARGB back to padded pixel data
+            out_w, out_h = output_argb.shape[1], output_argb.shape[0]
+            out_rowbytes = out_w * 4
+            out_pixels = output_argb.tobytes()
 
             # Build response
             response = bytearray(FRAME_HEADER_SIZE_LEGACY + len(out_pixels))
             response[:5] = FRAME_MAGIC
-            struct.pack_into(">I", response, 5, width)
-            struct.pack_into(">I", response, 9, height)
-            struct.pack_into(">I", response, 13, rowbytes)
+            struct.pack_into(">I", response, 5, out_w)
+            struct.pack_into(">I", response, 9, out_h)
+            struct.pack_into(">I", response, 13, out_rowbytes)
             response[FRAME_HEADER_SIZE_LEGACY:] = out_pixels
             return bytes(response)
 

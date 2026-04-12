@@ -59,9 +59,9 @@ A_Err SetupParams(PF_InData* in_data, PF_OutData* out_data)
     AEFX_CLR_STRUCT(def);
     PF_ADD_POPUP(
         "Quality",
-        2,
-        1,
-        "Quality|Performance",
+        4,                  // num_choices
+        1,                  // default (Full Res Tiled)
+        "Full Res (Tiled 512)|Fast (512)|Fastest (256)|High (1024)",
         PARAM_QUALITY_MODE
     );
 
