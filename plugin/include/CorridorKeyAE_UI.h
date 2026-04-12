@@ -36,7 +36,18 @@ A_Err RegisterCustomUI(PF_InData* in_data);
 
 // Custom control dimensions
 constexpr int CK_UI_WIDTH  = 300;
-constexpr int CK_UI_HEIGHT = 58;
+constexpr int CK_UI_HEIGHT = 72;
+
+// Status info updated by render, displayed by UI draw
+struct CK_StatusInfo {
+    bool bridge_connected = false;
+    float last_inference_ms = 0.0f;
+    bool cache_hit = false;
+    char status_text[128] = "Offline";
+};
+
+// Global status — written by render thread, read by UI draw
+extern CK_StatusInfo g_status;
 
 #endif
 

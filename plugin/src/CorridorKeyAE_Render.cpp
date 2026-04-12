@@ -6,10 +6,14 @@
 #include "CorridorKeyAE_Render.h"
 #include "CorridorKeyAE_Params.h"
 #include "CorridorKeyAE_Bridge.h"
+#include "CorridorKeyAE_UI.h"
 
 #if AE_SDK_AVAILABLE
 #include "Smart_Utils.h"
 #endif
+
+#include <chrono>
+#include <cstdio>
 
 namespace corridorkey {
 
@@ -509,14 +513,34 @@ A_Err SmartRender(
             request.hint_rowbytes = hint_world->width * 4;
         }
 
-        // Process through bridge
+        // Process through bridge (timed)
         FrameResponse response;
-        if (!err && g_bridge.ProcessFrame(request, response) && response.success) {
+        auto t_start = std::chrono::steady_clock::now();
+        bool ok = !err && g_bridge.ProcessFrame(request, response) && response.success;
+        auto t_end = std::chrono::steady_clock::now();
+        float ms = std::chrono::duration<float, std::milli>(t_end - t_start).count();
+
+        if (ok) {
             size_t expected = static_cast<size_t>(output_world->width) * output_world->height * 4;
             if (response.pixel_data.size() >= expected) {
                 WriteFrom8bpc(output_world, response.pixel_data.data(), bpp);
             }
+            // Update status
+            g_status.bridge_connected = true;
+            g_status.last_inference_ms = ms;
+            g_status.cache_hit = (ms < 50.0f); // Cache hits are < 50ms
+            if (g_status.cache_hit) {
+                snprintf(g_status.status_text, sizeof(g_status.status_text),
+                    "Ready  |  %.0fms (cached)  |  %dx%d",
+                    ms, request.width, request.height);
+            } else {
+                snprintf(g_status.status_text, sizeof(g_status.status_text),
+                    "Ready  |  %.0fms  |  %dx%d  |  %dbpc",
+                    ms, request.width, request.height, bpp * 2);
+            }
         } else {
+            g_status.bridge_connected = true;
+            snprintf(g_status.status_text, sizeof(g_status.status_text), "Bridge error");
             // Error fallback: copy input to output
             if (input_world->width == output_world->width &&
                 input_world->height == output_world->height) {
@@ -530,7 +554,10 @@ A_Err SmartRender(
             }
         }
     } else {
-        // Bridge offline: copy input to output (passthrough)
+        // Bridge offline
+        g_status.bridge_connected = false;
+        snprintf(g_status.status_text, sizeof(g_status.status_text), "Runtime offline");
+        // Copy input to output (passthrough)
         if (input_world->width == output_world->width &&
             input_world->height == output_world->height) {
             for (int y = 0; y < output_world->height; y++) {

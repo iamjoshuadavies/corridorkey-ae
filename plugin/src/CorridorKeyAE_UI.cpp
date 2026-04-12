@@ -19,6 +19,9 @@
 
 namespace corridorkey {
 
+// Global status info
+CK_StatusInfo g_status;
+
 // =============================================================================
 // Helper: Convert ASCII to UTF16 for Drawbot
 // =============================================================================
@@ -182,6 +185,41 @@ static PF_Err DrawEvent(
         }
         suites.supplier_suiteP->ReleaseObject(reinterpret_cast<DRAWBOT_ObjectRef>(underline_path));
     }
+
+    // --- Draw status line ---
+    float status_y = about_y + default_size * 1.2f;
+
+    DRAWBOT_ColorRGBA status_color;
+    if (g_status.bridge_connected) {
+        if (g_status.cache_hit) {
+            status_color = {0.3f, 0.8f, 0.3f, 0.8f};  // Green for cache hit
+        } else {
+            status_color = {0.5f, 0.7f, 0.9f, 0.8f};  // Blue for inference
+        }
+    } else {
+        status_color = {0.7f, 0.4f, 0.3f, 0.8f};      // Red-ish for offline
+    }
+
+    DRAWBOT_BrushRef status_brush = nullptr;
+    suites.supplier_suiteP->NewBrush(supplier, &status_color, &status_brush);
+
+    DRAWBOT_FontRef status_font = nullptr;
+    suites.supplier_suiteP->NewDefaultFont(supplier, default_size * 0.7f, &status_font);
+
+    DRAWBOT_UTF16Char status_text[128];
+    AsciiToUTF16(g_status.status_text, status_text, 128);
+    DRAWBOT_PointF32 status_origin = {cx + 10.0f, status_y};
+    suites.surface_suiteP->DrawString(
+        surface, status_brush, status_font,
+        status_text, &status_origin,
+        kDRAWBOT_TextAlignment_Left,
+        kDRAWBOT_TextTruncation_None, 0.0f
+    );
+
+    if (status_brush)
+        suites.supplier_suiteP->ReleaseObject(reinterpret_cast<DRAWBOT_ObjectRef>(status_brush));
+    if (status_font)
+        suites.supplier_suiteP->ReleaseObject(reinterpret_cast<DRAWBOT_ObjectRef>(status_font));
 
     // Cleanup
     if (about_brush)
