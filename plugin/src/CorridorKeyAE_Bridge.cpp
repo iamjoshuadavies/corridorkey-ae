@@ -16,6 +16,7 @@
 #include <string>
 #include <chrono>
 #include <array>
+#include <mutex>
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -143,6 +144,9 @@ struct RuntimeBridge::Impl {
     pid_t child_pid = -1;
     int runtime_port = 0;
     int stdout_pipe = -1;       // Pipe to read subprocess stdout
+
+    // Thread safety: MFR calls render from multiple threads
+    std::mutex bridge_mutex;
 
     // Reconnect cooldown: don't retry too fast
     time_point last_connect_attempt{};
@@ -336,6 +340,8 @@ RuntimeBridge::~RuntimeBridge()
 
 bool RuntimeBridge::EnsureConnected()
 {
+    std::lock_guard<std::mutex> lock(m_impl->bridge_mutex);
+
     // Already connected?
     if (m_impl->connected && m_impl->sock != INVALID_SOCK) {
         return true;
@@ -381,7 +387,9 @@ bool RuntimeBridge::EnsureConnected()
 
 bool RuntimeBridge::ProcessFrame(const FrameRequest& request, FrameResponse& response)
 {
-    if (!IsConnected()) {
+    std::lock_guard<std::mutex> lock(m_impl->bridge_mutex);
+
+    if (!m_impl->connected || m_impl->sock == INVALID_SOCK) {
         response.success = false;
         response.error_message = "Runtime not connected";
         return false;
@@ -481,7 +489,9 @@ bool RuntimeBridge::ProcessFrame(const FrameRequest& request, FrameResponse& res
 
 bool RuntimeBridge::GetStatus(RuntimeStatus& status)
 {
-    if (!IsConnected()) {
+    std::lock_guard<std::mutex> lock(m_impl->bridge_mutex);
+
+    if (!m_impl->connected || m_impl->sock == INVALID_SOCK) {
         status.model_state = "disconnected";
         return false;
     }
@@ -505,32 +515,32 @@ bool RuntimeBridge::GetStatus(RuntimeStatus& status)
 
 void RuntimeBridge::Shutdown()
 {
-    if (m_impl) {
-        if (m_impl->connected && m_impl->sock != INVALID_SOCK) {
-            std::string msg = "{\"type\":\"shutdown\"}";
-            std::vector<uint8_t> payload(msg.begin(), msg.end());
-            SendMessage(m_impl->sock, payload);
-        }
-        m_impl->CloseSocket();
+    if (!m_impl) return;
+    std::lock_guard<std::mutex> lock(m_impl->bridge_mutex);
 
-        if (m_impl->stdout_pipe >= 0) {
-            close(m_impl->stdout_pipe);
-            m_impl->stdout_pipe = -1;
-        }
+    if (m_impl->connected && m_impl->sock != INVALID_SOCK) {
+        std::string msg = "{\"type\":\"shutdown\"}";
+        std::vector<uint8_t> payload(msg.begin(), msg.end());
+        SendMessage(m_impl->sock, payload);
+    }
+    m_impl->CloseSocket();
 
-        if (m_impl->child_pid > 0) {
+    if (m_impl->stdout_pipe >= 0) {
+        close(m_impl->stdout_pipe);
+        m_impl->stdout_pipe = -1;
+    }
+
+    if (m_impl->child_pid > 0) {
 #ifndef _WIN32
-            kill(m_impl->child_pid, SIGTERM);
-            // Give it a moment, then force kill
-            usleep(500000); // 500ms
-            int status;
-            if (waitpid(m_impl->child_pid, &status, WNOHANG) == 0) {
-                kill(m_impl->child_pid, SIGKILL);
-                waitpid(m_impl->child_pid, &status, 0);
-            }
-#endif
-            m_impl->child_pid = -1;
+        kill(m_impl->child_pid, SIGTERM);
+        usleep(500000);
+        int status;
+        if (waitpid(m_impl->child_pid, &status, WNOHANG) == 0) {
+            kill(m_impl->child_pid, SIGKILL);
+            waitpid(m_impl->child_pid, &status, 0);
         }
+#endif
+        m_impl->child_pid = -1;
     }
 }
 
