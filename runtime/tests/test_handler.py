@@ -93,6 +93,49 @@ def test_process_frame_returns_modified_pixels():
     assert resp_pixels != pixels.tobytes(), "Pixels should be modified by the handler"
 
 
+def test_cache_hit_on_identical_frame():
+    """Sending the same frame twice should return cached result on second call."""
+    handler = RequestHandler()
+
+    width, height = 64, 48
+    pixels = np.zeros((height, width, 4), dtype=np.uint8)
+    pixels[:, :, 0] = 255  # A
+    pixels[:, :, 1] = 128  # R
+
+    msg = _build_frame_msg(width, height, pixels)
+
+    # First call — cache miss
+    resp1 = handler.handle_raw(msg)
+    assert resp1[:5] == b"FRAME"
+
+    # Second call — should be cache hit (identical frame + params)
+    resp2 = handler.handle_raw(msg)
+    assert resp2[:5] == b"FRAME"
+    assert resp1 == resp2  # Exact same response
+
+    # Check cache stats
+    status = json.loads(handler.handle_raw(b'{"type": "status"}'))
+    assert status["cache"]["hits"] >= 1
+
+
+def test_cache_miss_on_different_params():
+    """Changing params should cause a cache miss."""
+    handler = RequestHandler()
+
+    width, height = 32, 32
+    pixels = np.zeros((height, width, 4), dtype=np.uint8)
+    pixels[:, :, 0] = 255
+
+    msg1 = _build_frame_msg(width, height, pixels, output_mode=0)
+    msg2 = _build_frame_msg(width, height, pixels, output_mode=1)
+
+    handler.handle_raw(msg1)
+    handler.handle_raw(msg2)
+
+    status = json.loads(handler.handle_raw(b'{"type": "status"}'))
+    assert status["cache"]["misses"] >= 2  # Both were misses
+
+
 def test_frame_count_increments():
     """Verify the frame counter increments with each processed frame."""
     handler = RequestHandler()

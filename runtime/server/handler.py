@@ -9,10 +9,12 @@ M3: Uses real CorridorKey MLX inference when the model is loaded.
 Falls back to text overlay when the model is not available.
 """
 
+import hashlib
 import json
 import logging
 import struct
 import time
+from collections import OrderedDict
 from typing import Any, Optional
 
 import numpy as np
@@ -22,6 +24,96 @@ from engines.base import InferenceEngine, InferenceRequest
 from server.hardware import detect_hardware
 
 logger = logging.getLogger("corridorkey.handler")
+
+# =============================================================================
+# Frame cache — avoids re-processing identical frames
+# =============================================================================
+
+class FrameCache:
+    """LRU cache for processed frames, keyed by input hash + params."""
+
+    def __init__(self, max_entries: int = 64, max_bytes: int = 512 * 1024 * 1024) -> None:
+        self._cache: OrderedDict[str, bytes] = OrderedDict()
+        self._max_entries = max_entries
+        self._max_bytes = max_bytes  # 512MB default
+        self._current_bytes = 0
+        self._hits = 0
+        self._misses = 0
+
+    def _make_key(
+        self, width: int, height: int, pixel_hash: str,
+        output_mode: int, despill: float, despeckle: float,
+        refiner: float, matte_cleanup: float,
+        hint_hash: Optional[str] = None,
+    ) -> str:
+        """Build a cache key from frame dimensions, content hash, and params."""
+        parts = f"{width}:{height}:{pixel_hash}:{output_mode}:"
+        parts += f"{despill:.3f}:{despeckle:.3f}:{refiner:.3f}:{matte_cleanup:.3f}"
+        if hint_hash:
+            parts += f":{hint_hash}"
+        return parts
+
+    @staticmethod
+    def hash_pixels(data: bytes) -> str:
+        """Fast hash of pixel data. Uses xxhash-style sampling for speed."""
+        # Hash first 16KB + last 16KB + length for speed on large frames
+        sample_size = 16384
+        if len(data) <= sample_size * 2:
+            return hashlib.md5(data).hexdigest()
+        sample = data[:sample_size] + data[-sample_size:]
+        h = hashlib.md5(sample)
+        h.update(len(data).to_bytes(8, "big"))
+        return h.hexdigest()
+
+    def get(
+        self, width: int, height: int, pixel_hash: str,
+        output_mode: int, despill: float, despeckle: float,
+        refiner: float, matte_cleanup: float,
+        hint_hash: Optional[str] = None,
+    ) -> Optional[bytes]:
+        key = self._make_key(
+            width, height, pixel_hash, output_mode,
+            despill, despeckle, refiner, matte_cleanup, hint_hash,
+        )
+        if key in self._cache:
+            self._hits += 1
+            self._cache.move_to_end(key)
+            return self._cache[key]
+        self._misses += 1
+        return None
+
+    def put(
+        self, width: int, height: int, pixel_hash: str,
+        output_mode: int, despill: float, despeckle: float,
+        refiner: float, matte_cleanup: float,
+        response: bytes,
+        hint_hash: Optional[str] = None,
+    ) -> None:
+        key = self._make_key(
+            width, height, pixel_hash, output_mode,
+            despill, despeckle, refiner, matte_cleanup, hint_hash,
+        )
+        entry_size = len(response)
+
+        # Evict until we have room
+        while (len(self._cache) >= self._max_entries or
+               self._current_bytes + entry_size > self._max_bytes) and self._cache:
+            _, old = self._cache.popitem(last=False)
+            self._current_bytes -= len(old)
+
+        self._cache[key] = response
+        self._current_bytes += entry_size
+
+    @property
+    def stats(self) -> dict[str, Any]:
+        total = self._hits + self._misses
+        return {
+            "entries": len(self._cache),
+            "bytes": self._current_bytes,
+            "hits": self._hits,
+            "misses": self._misses,
+            "hit_rate": f"{self._hits / total * 100:.1f}%" if total > 0 else "0%",
+        }
 
 # Binary frame header:
 #   "FRAME" (5) + width(4) + height(4) + rowbytes(4) + output_mode(1)
@@ -42,6 +134,7 @@ class RequestHandler:
         self._frame_count = 0
         self._engine = engine
         self._last_inference_ms: float = 0
+        self._cache = FrameCache()
 
     def handle_raw(self, data: bytes) -> bytes:
         """Handle a raw message (bytes). Detect format and dispatch."""
@@ -88,6 +181,7 @@ class RequestHandler:
             "warmup_complete": engine_ready,
             "frames_processed": self._frame_count,
             "last_inference_ms": self._last_inference_ms,
+            "cache": self._cache.stats,
         }
 
     def _handle_shutdown(self, msg: dict[str, Any]) -> dict[str, Any]:
@@ -147,16 +241,46 @@ class RequestHandler:
 
         self._frame_count += 1
 
+        # --- Check cache first ---
+        pixel_hash = FrameCache.hash_pixels(pixel_data)
+        hint_hash = FrameCache.hash_pixels(hint_data) if hint_data else None
+
+        cached = self._cache.get(
+            width, height, pixel_hash, output_mode,
+            despill, despeckle, refiner, matte_cleanup, hint_hash,
+        )
+        if cached is not None:
+            logger.info("Cache HIT (%s)", self._cache.stats["hit_rate"])
+            return cached
+
         # --- Try real inference ---
         if self._engine is not None and self._engine.is_ready():
-            return self._process_with_engine(
+            result = self._process_with_engine(
                 width, height, rowbytes, pixel_data,
                 output_mode, despill, despeckle, refiner, matte_cleanup,
                 hint_data, hint_width, hint_height, hint_rowbytes,
             )
+            # Cache successful results (don't cache errors)
+            if result[:5] == FRAME_MAGIC:
+                self._cache.put(
+                    width, height, pixel_hash, output_mode,
+                    despill, despeckle, refiner, matte_cleanup,
+                    result, hint_hash,
+                )
+                logger.info("Cached frame (%d entries, %s)",
+                             self._cache.stats["entries"],
+                             self._cache.stats["hit_rate"])
+            return result
 
         # --- Fallback: text overlay ---
-        return self._process_fallback_overlay(width, height, rowbytes, pixel_data)
+        result = self._process_fallback_overlay(width, height, rowbytes, pixel_data)
+        if result[:5] == FRAME_MAGIC:
+            self._cache.put(
+                width, height, pixel_hash, output_mode,
+                despill, despeckle, refiner, matte_cleanup,
+                result, hint_hash,
+            )
+        return result
 
     def _process_with_engine(
         self, width: int, height: int, rowbytes: int, pixel_data: bytes,
