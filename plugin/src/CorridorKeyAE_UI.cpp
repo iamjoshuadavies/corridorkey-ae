@@ -101,7 +101,7 @@ static PF_Err DrawEvent(
 
     // --- Draw "CorridorKey" title ---
     float text_x = cx + 10.0f + 38.0f + 10.0f;  // After logo + padding
-    float title_y = cy + 12.0f;
+    float title_y = cy + 16.0f;  // More room for ascenders
 
     DRAWBOT_FontRef title_font = nullptr;
     float default_size = 0;
@@ -212,20 +212,19 @@ static PF_Err ClickEvent(
         return PF_Err_NONE;
     }
 
-    // Get click position relative to control
+    // Match the draw layout coordinates
     float cx = static_cast<float>(event_extra->effect_win.current_frame.left);
     float cy = static_cast<float>(event_extra->effect_win.current_frame.top);
     float mx = static_cast<float>(event_extra->u.do_click.screen_point.h);
     float my = static_cast<float>(event_extra->u.do_click.screen_point.v);
 
-    float text_x = cx + 84.0f;
-    float default_size = 12.0f; // approximate
+    // "About" link area: text_x = cx + 58, positioned below tagline
+    float text_x = cx + 58.0f;
+    float about_top = cy + 42.0f;   // Approximate y of About text
+    float about_bottom = cy + 58.0f;
 
-    // Check if click is in the "About" text area
-    float about_y = cy + 14.0f + default_size * 1.8f + default_size * 1.3f;
-    if (mx >= text_x && mx <= text_x + 50.0f &&
-        my >= about_y - 5.0f && my <= about_y + default_size + 5.0f) {
-        // Show about dialog
+    if (mx >= text_x && mx <= text_x + 40.0f &&
+        my >= about_top && my <= about_bottom) {
         PF_SPRINTF(out_data->return_msg,
             "CorridorKey v%s\n\n"
             "Advanced green-screen keying for After Effects.\n"
