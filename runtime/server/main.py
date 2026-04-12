@@ -18,7 +18,7 @@ from server.hardware import detect_hardware
 logger = logging.getLogger("corridorkey.runtime")
 
 
-def create_engine(model_path: Optional[str] = None, img_size: int = 512) -> Optional[InferenceEngine]:
+def create_engine(model_path: Optional[str] = None, tile_size: int = 512) -> Optional[InferenceEngine]:
     """Create and load the best available inference engine."""
 
     # Try MLX first (Apple Silicon)
@@ -33,7 +33,7 @@ def create_engine(model_path: Optional[str] = None, img_size: int = 512) -> Opti
                 return None
             model_path = str(weights)
 
-        engine = MLXEngine(img_size=img_size, use_refiner=True, compile=True)
+        engine = MLXEngine(tile_size=tile_size, use_refiner=True)
         engine.load_model(model_path)
         logger.info("MLX engine ready: %s", engine.device_name)
         return engine
@@ -54,7 +54,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=0, help="TCP port (0 = auto-assign)")
     parser.add_argument("--socket", type=str, default=None, help="Unix domain socket path")
     parser.add_argument("--model", type=str, default=None, help="Path to model weights")
-    parser.add_argument("--img-size", type=int, default=512, help="Model internal resolution (512=fast/M1, 1024/2048=quality/needs GPU)")
+    parser.add_argument("--tile-size", type=int, default=512, help="Tile size for tiled inference (512=default, larger=more VRAM)")
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
 
@@ -68,7 +68,7 @@ def main() -> None:
     logger.info("Hardware: %s", hw_info)
 
     # Initialize inference engine
-    engine = create_engine(model_path=args.model, img_size=args.img_size)
+    engine = create_engine(model_path=args.model, tile_size=args.tile_size)
 
     # Create and start IPC server with engine
     from server.handler import RequestHandler

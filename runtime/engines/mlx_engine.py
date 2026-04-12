@@ -40,27 +40,40 @@ def find_model_weights() -> Optional[Path]:
 
 
 class MLXEngine(InferenceEngine):
-    """CorridorKey inference engine using MLX (Apple Silicon)."""
+    """CorridorKey inference engine using MLX (Apple Silicon).
 
-    def __init__(self, img_size: int = 512, use_refiner: bool = True, compile: bool = True) -> None:
+    Uses tiled inference by default for full-resolution output.
+    Tiles are processed at tile_size×tile_size with overlap blending.
+    """
+
+    def __init__(
+        self,
+        tile_size: int = 512,
+        overlap: int = 64,
+        use_refiner: bool = True,
+    ) -> None:
         self._engine = None
         self._model_path: Optional[str] = None
-        self._img_size = img_size
+        self._tile_size = tile_size
+        self._overlap = overlap
         self._use_refiner = use_refiner
-        self._compile = compile
 
     def load_model(self, model_path: str) -> None:
         """Load the CorridorKey MLX model from a safetensors checkpoint."""
         from corridorkey_mlx import CorridorKeyMLXEngine
 
-        logger.info("Loading CorridorKey MLX model from: %s (img_size=%d, refiner=%s, compile=%s)",
-                     model_path, self._img_size, self._use_refiner, self._compile)
+        logger.info(
+            "Loading CorridorKey MLX model from: %s (tile_size=%d, overlap=%d, refiner=%s)",
+            model_path, self._tile_size, self._overlap, self._use_refiner,
+        )
 
         self._engine = CorridorKeyMLXEngine(
             checkpoint_path=model_path,
-            img_size=self._img_size,
+            img_size=self._tile_size,
+            tile_size=self._tile_size,
+            overlap=self._overlap,
             use_refiner=self._use_refiner,
-            compile=self._compile,
+            compile=False,  # Compile not used in tiled mode
         )
         self._model_path = model_path
         logger.info("CorridorKey MLX model loaded successfully")

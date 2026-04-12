@@ -246,7 +246,7 @@ struct RuntimeBridge::Impl {
             // Exec the runtime server
             execl(python.c_str(), "python3", "-m", "server.main",
                   "--port", "0", // Auto-assign port
-                  "--img-size", "512",
+                  "--tile-size", "512",
                   nullptr);
 
             // If exec failed
