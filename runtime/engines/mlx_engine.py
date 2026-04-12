@@ -35,8 +35,30 @@ def find_model_weights() -> Optional[Path]:
         if path.exists():
             logger.info("Found model weights at: %s", path)
             return path
-    logger.warning("No model weights found in any known location")
-    return None
+    logger.info("No model weights found locally — attempting download...")
+    return download_model_weights()
+
+
+def download_model_weights() -> Optional[Path]:
+    """Download model weights from the corridorkey-mlx GitHub release."""
+    try:
+        from corridorkey_mlx.weights import download_weights
+
+        # Download to our own cache location
+        dest = Path.home() / "Library" / "Application Support" / "CorridorKey" / "models"
+        dest.mkdir(parents=True, exist_ok=True)
+
+        logger.info("Downloading CorridorKey model weights to %s ...", dest)
+        path = download_weights(out=dest)
+        logger.info("Model weights downloaded: %s", path)
+        return path
+
+    except ImportError:
+        logger.error("corridorkey_mlx.weights not available for download")
+        return None
+    except Exception:
+        logger.exception("Failed to download model weights")
+        return None
 
 
 class MLXEngine(InferenceEngine):
