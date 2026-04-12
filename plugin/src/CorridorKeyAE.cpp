@@ -9,6 +9,7 @@
 #include "CorridorKeyAE.h"
 #include "CorridorKeyAE_Params.h"
 #include "CorridorKeyAE_Render.h"
+#include "CorridorKeyAE_UI.h"
 
 #if AE_SDK_AVAILABLE
 
@@ -83,6 +84,11 @@ EffectMain(
                 err = corridorkey::HandleRender(in_data, out_data, params, output);
                 break;
 
+            case PF_Cmd_EVENT:
+                err = corridorkey::HandleEvent(in_data, out_data, params, output,
+                    reinterpret_cast<PF_EventExtra*>(extra));
+                break;
+
             case PF_Cmd_USER_CHANGED_PARAM:
                 err = corridorkey::HandleUserChangedParam(in_data, out_data, params,
                     reinterpret_cast<PF_UserChangedParamExtra*>(extra));
@@ -144,7 +150,8 @@ A_Err HandleGlobalSetup(PF_InData* in_data, PF_OutData* out_data)
 
     out_data->out_flags =
         PF_OutFlag_PIX_INDEPENDENT |
-        PF_OutFlag_DEEP_COLOR_AWARE;
+        PF_OutFlag_DEEP_COLOR_AWARE |
+        PF_OutFlag_CUSTOM_UI;
 
     out_data->out_flags2 =
         PF_OutFlag2_SUPPORTS_SMART_RENDER |
@@ -188,10 +195,10 @@ A_Err HandleUserChangedParam(PF_InData* in_data, PF_OutData* out_data, PF_ParamD
     if (extra->param_index == PARAM_ABOUT_BUTTON) {
         PF_SPRINTF(out_data->return_msg,
             "CorridorKey v%s\n\n"
-            "Advanced green-screen keying for After Effects.\n"
+            "Based on the green-screen keying technique created by\n"
+            "Niko Pueringer of Corridor Digital (youtube.com/CorridorCrew).\n\n"
             "Physically accurate foreground/background unmixing\n"
-            "powered by MLX on Apple Silicon.\n\n"
-            "Based on CorridorKey by Niko Pueringer / Corridor Digital.",
+            "powered by MLX on Apple Silicon.",
             CK_VERSION_STRING
         );
         out_data->out_flags |= PF_OutFlag_DISPLAY_ERROR_MESSAGE;
