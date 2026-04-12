@@ -92,16 +92,16 @@ static PF_Err DrawEvent(
     );
 
     if (logo_ref) {
-        float logo_x = cx + 8.0f;
-        float logo_y = cy + 8.0f;
+        float logo_x = cx + 10.0f;
+        float logo_y = cy + 10.0f;
         DRAWBOT_PointF32 logo_origin = {logo_x, logo_y};
         suites.surface_suiteP->DrawImage(surface, logo_ref, &logo_origin, 1.0f);
         suites.supplier_suiteP->ReleaseObject(reinterpret_cast<DRAWBOT_ObjectRef>(logo_ref));
     }
 
     // --- Draw "CorridorKey" title ---
-    float text_x = cx + 8.0f + 64.0f + 12.0f;  // After logo + padding
-    float title_y = cy + 14.0f;
+    float text_x = cx + 10.0f + 38.0f + 10.0f;  // After logo + padding
+    float title_y = cy + 12.0f;
 
     DRAWBOT_FontRef title_font = nullptr;
     float default_size = 0;
@@ -164,13 +164,13 @@ static PF_Err DrawEvent(
         kDRAWBOT_TextTruncation_None, 0.0f
     );
 
-    // Draw underline for "About"
+    // Draw underline for "About" — tight to the text
     DRAWBOT_PathRef underline_path = nullptr;
     suites.supplier_suiteP->NewPath(supplier, &underline_path);
     if (underline_path) {
-        float underline_y_pos = about_y + default_size * 0.95f;
+        float underline_y_pos = about_y + default_size * 0.05f;
         DRAWBOT_PointF32 p1 = {text_x, underline_y_pos};
-        DRAWBOT_PointF32 p2 = {text_x + 35.0f, underline_y_pos};
+        DRAWBOT_PointF32 p2 = {text_x + 28.0f, underline_y_pos};
         suites.path_suiteP->MoveTo(underline_path, p1.x, p1.y);
         suites.path_suiteP->LineTo(underline_path, p2.x, p2.y);
 

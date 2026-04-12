@@ -36,7 +36,7 @@ A_Err RegisterCustomUI(PF_InData* in_data);
 
 // Custom control dimensions
 constexpr int CK_UI_WIDTH  = 300;
-constexpr int CK_UI_HEIGHT = 80;
+constexpr int CK_UI_HEIGHT = 58;
 
 #endif
 
