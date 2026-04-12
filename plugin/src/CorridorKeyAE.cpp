@@ -150,7 +150,8 @@ A_Err HandleGlobalSetup(PF_InData* in_data, PF_OutData* out_data)
 
     out_data->out_flags =
         PF_OutFlag_PIX_INDEPENDENT |
-        PF_OutFlag_DEEP_COLOR_AWARE;
+        PF_OutFlag_DEEP_COLOR_AWARE |
+        PF_OutFlag_CUSTOM_UI;
 
     out_data->out_flags2 =
         PF_OutFlag2_SUPPORTS_SMART_RENDER |
