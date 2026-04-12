@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(CorridorKeyAE VERSION 0.1.0 LANGUAGES CXX)
+project(CorridorKeyAE VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -28,12 +28,16 @@ set(PLUGIN_SOURCES
     src/CorridorKeyAE_Params.cpp
     src/CorridorKeyAE_Render.cpp
     src/CorridorKeyAE_Bridge.cpp
+    src/CorridorKeyAE_UI.cpp
 )
 
 # SDK utility sources needed for smart render
 set(SDK_UTIL_SOURCES)
 if(AE_SDK_FOUND)
-    list(APPEND SDK_UTIL_SOURCES "${AE_SDK_PATH}/Util/Smart_Utils.cpp")
+    list(APPEND SDK_UTIL_SOURCES
+        "${AE_SDK_PATH}/Util/Smart_Utils.cpp"
+        "${AE_SDK_PATH}/Util/AEFX_SuiteHelper.c"
+    )
 endif()
 
 set(PLUGIN_HEADERS
@@ -42,6 +46,8 @@ set(PLUGIN_HEADERS
     include/CorridorKeyAE_Render.h
     include/CorridorKeyAE_Bridge.h
     include/CorridorKeyAE_Version.h
+    include/CorridorKeyAE_UI.h
+    include/CorridorKeyAE_Logo.h
 )
 
 # --- Build target ---

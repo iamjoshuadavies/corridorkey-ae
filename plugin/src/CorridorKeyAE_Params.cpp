@@ -4,6 +4,7 @@
 */
 
 #include "CorridorKeyAE_Params.h"
+#include "CorridorKeyAE_UI.h"
 
 namespace corridorkey {
 
@@ -13,15 +14,18 @@ A_Err SetupParams(PF_InData* in_data, PF_OutData* out_data)
     PF_Err err = PF_Err_NONE;
     PF_ParamDef def;
 
-    // --- About button (branding) ---
+    // --- Branding header (custom drawn control) ---
     AEFX_CLR_STRUCT(def);
-    PF_ADD_BUTTON(
-        "CorridorKey",
-        "About",
-        0,                          // PUI flags
-        PF_ParamFlag_SUPERVISE,     // Call us on click
-        PARAM_ABOUT_BUTTON
-    );
+    def.param_type = PF_Param_NO_DATA;
+    PF_STRNNCPY(def.PF_DEF_NAME, "", sizeof(def.PF_DEF_NAME));
+    def.ui_flags = PF_PUI_CONTROL | PF_PUI_DONT_ERASE_CONTROL;
+    def.ui_width = CK_UI_WIDTH;
+    def.ui_height = CK_UI_HEIGHT;
+    def.uu.id = PARAM_ABOUT_BUTTON;
+    if ((err = PF_ADD_PARAM(in_data, -1, &def)) != PF_Err_NONE) return err;
+
+    // Register for custom UI events
+    RegisterCustomUI(in_data);
 
     // --- Output Mode ---
     AEFX_CLR_STRUCT(def);

@@ -9,6 +9,7 @@
 #include "CorridorKeyAE.h"
 #include "CorridorKeyAE_Params.h"
 #include "CorridorKeyAE_Render.h"
+#include "CorridorKeyAE_UI.h"
 
 #if AE_SDK_AVAILABLE
 
@@ -81,6 +82,11 @@ EffectMain(
 
             case PF_Cmd_RENDER:
                 err = corridorkey::HandleRender(in_data, out_data, params, output);
+                break;
+
+            case PF_Cmd_EVENT:
+                err = corridorkey::HandleEvent(in_data, out_data, params, output,
+                    reinterpret_cast<PF_EventExtra*>(extra));
                 break;
 
             case PF_Cmd_USER_CHANGED_PARAM:
