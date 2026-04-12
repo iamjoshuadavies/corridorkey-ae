@@ -44,7 +44,7 @@ resource 'PiPL' (16000) {
 			0x04000040	/* PF_OutFlag_DEEP_COLOR_AWARE | PF_OutFlag_PIX_INDEPENDENT */
 		},
 		AE_Effect_Global_OutFlags_2 {
-			0x00000400	/* PF_OutFlag2_FLOAT_COLOR_AWARE */
+			0x00000000	/* 32bpc float requires smart render — deferred */
 		},
 		AE_Effect_Match_Name {
 			"com.corridorkey.ae"

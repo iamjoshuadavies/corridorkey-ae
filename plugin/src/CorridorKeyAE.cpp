@@ -131,8 +131,9 @@ A_Err HandleGlobalSetup(PF_InData* in_data, PF_OutData* out_data)
         PF_OutFlag_PIX_INDEPENDENT |
         PF_OutFlag_DEEP_COLOR_AWARE;
 
-    out_data->out_flags2 =
-        PF_OutFlag2_FLOAT_COLOR_AWARE;
+    // Note: PF_OutFlag2_FLOAT_COLOR_AWARE requires SUPPORTS_SMART_RENDER.
+    // 32bpc float support deferred until smart render is implemented.
+    out_data->out_flags2 = 0;
 #endif
     return PF_Err_NONE;
 }
