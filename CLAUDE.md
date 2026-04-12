@@ -2,7 +2,8 @@
 
 ## Project Overview
 Native Adobe After Effects plugin for green-screen keying, based on CorridorKey.
-Three-layer architecture: Host Plugin (C++) → Bridge (IPC) → Runtime (Python).
+Three-layer architecture: Host Plugin (C++) → Bridge (IPC) → Runtime (Python/MLX).
+Created by Niko Pueringer / Corridor Digital. AE plugin wrapper by this project.
 
 ## Build Commands
 ```bash
@@ -18,22 +19,54 @@ cd runtime && source .venv/bin/activate && python -m pytest tests/
 
 # Run full test suite
 scripts/bootstrap/run_tests.sh
+
+# Start runtime manually (for dev — auto-launch handles this normally)
+cd runtime && source .venv/bin/activate && python -m server.main --port 12345
 ```
 
 ## Architecture
-- `plugin/` — C++ AE effect plugin (CMake build)
-- `runtime/` — Python inference service (PyTorch/MLX)
+- `plugin/` — C++ AE effect plugin (CMake build, Drawbot UI, Smart Render)
+- `runtime/` — Python inference service (corridorkey_mlx, tiled inference)
 - `shared/` — IPC protocol definitions and schemas
 - `scripts/` — Bootstrap, packaging, release automation
 - `docs/` — Architecture docs, PRD, research findings
 
+### IPC Protocol
+Length-prefixed binary messages over TCP (127.0.0.1, auto-assigned port).
+- JSON text messages: ping, status, shutdown
+- Binary FRAME messages: `"FRAME"` magic + dimensions + params + pixel data + optional alpha hint
+- Response: `"FRAME"` magic + dimensions + processed pixel data
+- All pixel data is ARGB 8bpc (converted from/to project bit depth in C++)
+
+### Inference Pipeline
+- Model: CorridorKey via `corridorkey_mlx` package (pip from GitHub)
+- Mode: **Tiled inference** (tile_size=512, overlap=64) for full-resolution output
+- Performance: ~4.6s/frame at 1920×1080 on M1, ~0.3s at 512×512
+- Model weights: `~/Library/Application Support/EZ-CorridorKey/CorridorKeyModule/checkpoints/corridorkey_mlx.safetensors`
+- img_size=2048 is NOT viable on M1 (~450s/frame). Tiled mode at 512 is the correct approach.
+
 ## Key Conventions
 - CMake 3.15+ for all C++ builds
 - Plugin targets macOS Universal (Intel + ARM64) and Windows x64
-- Runtime uses Python 3.10+
-- IPC over local socket (msgpack framing)
+- Runtime uses Python 3.10+ (3.12 via Homebrew on this machine)
+- IPC over local TCP socket (length-prefixed binary framing)
 - All model weights excluded from repo (downloaded at first run)
-- Effect parameters follow AE Skeleton sample patterns
+- PiPL flags and GlobalSetup out_flags MUST match exactly
+- Smart Render required for 32bpc float support
+- MFR (Multi-Frame Rendering) enabled — bridge uses mutex to serialize
+
+## Current Features
+- Smart Render: 8bpc, 16bpc, 32bpc float
+- Multi-Frame Rendering (threaded, serialized via mutex)
+- Auto-launch runtime subprocess (fork/exec, PORT discovery from stdout)
+- Reconnect with exponential backoff cooldown
+- Zombie process cleanup on re-launch
+- Custom Drawbot UI: logo, title, tagline, clickable About link
+- Alpha hint layer input (PF_ADD_LAYER)
+- Output modes: Processed, Matte, Foreground, Composite
+- Effect params: Device, Quality, Low Memory, Despill, Despeckle, Refiner, Matte Cleanup
+- Tiled inference for full-resolution output
+- Debug image saves gated behind CK_DEBUG=1 env var
 
 ## AE Plugin Debugging
 
@@ -47,6 +80,8 @@ Search for "CorridorKey" to see load status. Key messages:
 - `"The plugin is marked as Ignore"` — AE cached plugin as broken from a previous failed load. Fix: touch the binary + re-codesign, or clean rebuild, then restart AE.
 - `"parameter count mismatch (X :: Y)"` — `PARAM_COUNT` enum doesn't match params registered in `SetupParams()`
 - `"did not initialize max_result_rect in PF_Cmd_SMART_PRE_RENDER"` — declared `PF_OutFlag2_SUPPORTS_SMART_RENDER` but didn't implement smart render handlers
+- `"no custom ui outflag"` — using PF_PUI_CONTROL without PF_OutFlag_CUSTOM_UI in GlobalSetup
+- `"PF_OutFlag2_FLOAT_COLOR_AWARE requires PF_OutFlag2_SUPPORTS_SMART_RENDER"` — need smart render for 32bpc
 
 ### Plugin Cache ("Ignore" state)
 AE caches broken plugins and skips them on subsequent launches. To force a rescan:
@@ -61,6 +96,10 @@ The PiPL `.r` resource and `GlobalSetup` out_flags MUST match. If they disagree,
 - Update `HandleGlobalSetup()` in `plugin/src/CorridorKeyAE.cpp`
 - Do a clean rebuild (PiPL is compiled with Rez)
 
+Current flags:
+- `out_flags`: PIX_INDEPENDENT | DEEP_COLOR_AWARE | CUSTOM_UI
+- `out_flags2`: SUPPORTS_SMART_RENDER | FLOAT_COLOR_AWARE | SUPPORTS_THREADED_RENDERING
+
 ### Plugin Symlink (dev)
 Plugin is symlinked into AE for live development:
 ```
@@ -68,6 +107,12 @@ Plugin is symlinked into AE for live development:
   → build/plugin/CorridorKey.plugin
 ```
 Rebuilds auto-update. Restart AE to pick up changes.
+
+### Crash/Hang Logs
+```
+/Library/Logs/DiagnosticReports/After Effects_*.diag   # crashes
+/Library/Logs/DiagnosticReports/After Effects_*.hang   # hangs/deadlocks
+```
 
 ## Licensing
 NOT YET RESOLVED — see LICENSE file. Do not describe as "open source."
