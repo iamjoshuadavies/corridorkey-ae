@@ -22,12 +22,13 @@ class InferenceRequest:
     despeckle: float = 0.0
     refiner: float = 0.5
     matte_cleanup: float = 0.0
+    float_output: bool = False      # Future: return float32 instead of uint8
 
 
 @dataclass
 class InferenceResult:
     """Result of processing a frame."""
-    image: NDArray[np.uint8]        # (H, W, 4) ARGB uint8
+    image: NDArray[np.uint8]        # (H, W, 4) ARGB uint8 (float32 support planned)
     success: bool = True
     error: str = ""
 
