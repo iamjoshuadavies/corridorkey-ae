@@ -156,22 +156,26 @@ class MLXEngine(InferenceEngine):
             rgb[:, :, 1] = argb[:, :, 2]  # G
             rgb[:, :, 2] = argb[:, :, 3]  # B
 
-            # Build cache key for raw model output: pixel content + refiner + mode
-            # Post-processing params (despill, despeckle, cleanup) are NOT in this key
+            # Build cache key for raw model output: pixel content + refiner + mode + hint
+            # Post-processing params (despill, despeckle, cleanup, brightness) are NOT in this key
             import hashlib
+            alpha_hint = getattr(request, '_alpha_hint', None)
             pixel_sample = rgb[:4].tobytes() + rgb[-4:].tobytes()
+            hint_sample = b""
+            if alpha_hint is not None:
+                hint_sample = alpha_hint[:4].tobytes() + alpha_hint[-4:].tobytes()
             raw_key = hashlib.md5(
-                pixel_sample + f":{request.refiner:.3f}:{use_tiled}:{h}:{w}".encode()
+                pixel_sample + hint_sample
+                + f":{request.refiner:.3f}:{use_tiled}:{h}:{w}".encode()
             ).hexdigest()
 
-            # Check raw cache — skip inference if same frame + refiner
+            # Check raw cache — skip inference if same frame + refiner + hint
             if raw_key == self._raw_cache_key and self._raw_cache_alpha is not None:
                 alpha = self._raw_cache_alpha.copy()
                 fg = self._raw_cache_fg.copy()
                 logger.info("Raw model cache HIT — skipping inference, applying post-processing only")
             else:
-                # Alpha hint
-                alpha_hint = getattr(request, '_alpha_hint', None)
+                # Alpha hint (already fetched above for cache key)
                 if alpha_hint is None:
                     alpha_hint = np.full((h, w), 255, dtype=np.uint8)
                 else:
