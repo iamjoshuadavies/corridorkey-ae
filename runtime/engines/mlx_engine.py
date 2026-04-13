@@ -64,8 +64,9 @@ def download_model_weights() -> Optional[Path]:
 class MLXEngine(InferenceEngine):
     """CorridorKey inference engine using MLX (Apple Silicon).
 
-    Uses tiled inference by default for full-resolution output.
-    Tiles are processed at tile_size×tile_size with overlap blending.
+    Switches between tiled and direct mode on demand.
+    Only one engine instance in memory at a time to conserve RAM.
+    Reinitializes when the mode changes.
     """
 
     def __init__(
@@ -79,29 +80,49 @@ class MLXEngine(InferenceEngine):
         self._tile_size = tile_size
         self._overlap = overlap
         self._use_refiner = use_refiner
+        self._current_mode_tiled: Optional[bool] = None  # Track current mode
 
     def load_model(self, model_path: str) -> None:
-        """Load the CorridorKey MLX model from a safetensors checkpoint."""
+        """Load the CorridorKey MLX model in tiled mode (default)."""
+        self._model_path = model_path
+        self._init_engine(tiled=True)
+
+    def _init_engine(self, tiled: bool) -> None:
+        """Initialize or reinitialize the engine in the specified mode."""
         from corridorkey_mlx import CorridorKeyMLXEngine
 
-        logger.info(
-            "Loading CorridorKey MLX model from: %s (tile_size=%d, overlap=%d, refiner=%s)",
-            model_path, self._tile_size, self._overlap, self._use_refiner,
-        )
+        if self._current_mode_tiled == tiled and self._engine is not None:
+            return  # Already in the right mode
 
-        self._engine = CorridorKeyMLXEngine(
-            checkpoint_path=model_path,
-            img_size=self._tile_size,
-            tile_size=self._tile_size,
-            overlap=self._overlap,
-            use_refiner=self._use_refiner,
-            compile=False,  # Compile not used in tiled mode
-        )
+        # Release old engine
+        self._engine = None
+
+        mode_str = "tiled" if tiled else "direct"
+        logger.info("Initializing MLX engine (%s mode, tile_size=%d)", mode_str, self._tile_size)
+
+        if tiled:
+            self._engine = CorridorKeyMLXEngine(
+                checkpoint_path=self._model_path,
+                img_size=self._tile_size,
+                tile_size=self._tile_size,
+                overlap=self._overlap,
+                use_refiner=self._use_refiner,
+                compile=False,
+            )
+        else:
+            self._engine = CorridorKeyMLXEngine(
+                checkpoint_path=self._model_path,
+                img_size=self._tile_size,
+                use_refiner=self._use_refiner,
+                compile=False,
+            )
+
+        self._current_mode_tiled = tiled
         self._model_path = model_path
         logger.info("CorridorKey MLX model loaded successfully")
 
     def is_ready(self) -> bool:
-        return self._engine is not None
+        return self._engine is not None and self._model_path is not None
 
     def process(self, request: InferenceRequest) -> InferenceResult:
         """Process a frame through CorridorKey MLX inference."""
@@ -113,6 +134,10 @@ class MLXEngine(InferenceEngine):
             )
 
         try:
+            # Switch engine mode if needed: tiled for quality 0, direct for 1-3
+            use_tiled = not getattr(request, '_use_direct', False)
+            self._init_engine(tiled=use_tiled)
+
             # Input is (H, W, 4) ARGB uint8 from AE
             argb = request.image
             h, w = argb.shape[:2]
@@ -201,6 +226,7 @@ class MLXEngine(InferenceEngine):
 
     def unload(self) -> None:
         self._engine = None
+        self._current_mode_tiled = None
         self._model_path = None
 
     @property

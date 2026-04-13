@@ -364,8 +364,9 @@ class RequestHandler:
                 refiner=refiner,
                 matte_cleanup=matte_cleanup,
             )
-            # Attach the alpha hint to the request for the engine
+            # Attach the alpha hint and quality mode to the request
             request._alpha_hint = alpha_hint_image  # type: ignore[attr-defined]
+            request._use_direct = (quality_mode != 0)  # type: ignore[attr-defined]
 
             # Run inference
             t0 = time.perf_counter()
