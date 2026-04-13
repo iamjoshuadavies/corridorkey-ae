@@ -45,11 +45,11 @@ class FrameCache:
         output_mode: int, despill: float, despeckle: float,
         refiner: float, matte_cleanup: float,
         hint_hash: Optional[str] = None,
-        quality_mode: int = 0,
+        quality_mode: int = 0, brightness: float = 1.0,
     ) -> str:
-        """Build a cache key from frame dimensions, content hash, and params."""
+        """Build a cache key from frame dimensions, content hash, and ALL params."""
         parts = f"{width}:{height}:{pixel_hash}:{output_mode}:{quality_mode}:"
-        parts += f"{despill:.3f}:{despeckle:.3f}:{refiner:.3f}:{matte_cleanup:.3f}"
+        parts += f"{despill:.3f}:{despeckle:.3f}:{refiner:.3f}:{matte_cleanup:.3f}:{brightness:.3f}"
         if hint_hash:
             parts += f":{hint_hash}"
         return parts
@@ -71,11 +71,12 @@ class FrameCache:
         output_mode: int, despill: float, despeckle: float,
         refiner: float, matte_cleanup: float,
         hint_hash: Optional[str] = None,
-        quality_mode: int = 0,
+        quality_mode: int = 0, brightness: float = 1.0,
     ) -> Optional[bytes]:
         key = self._make_key(
             width, height, pixel_hash, output_mode,
-            despill, despeckle, refiner, matte_cleanup, hint_hash, quality_mode,
+            despill, despeckle, refiner, matte_cleanup, hint_hash,
+            quality_mode, brightness,
         )
         if key in self._cache:
             self._hits += 1
@@ -90,11 +91,12 @@ class FrameCache:
         refiner: float, matte_cleanup: float,
         response: bytes,
         hint_hash: Optional[str] = None,
-        quality_mode: int = 0,
+        quality_mode: int = 0, brightness: float = 1.0,
     ) -> None:
         key = self._make_key(
             width, height, pixel_hash, output_mode,
-            despill, despeckle, refiner, matte_cleanup, hint_hash, quality_mode,
+            despill, despeckle, refiner, matte_cleanup, hint_hash,
+            quality_mode, brightness,
         )
         entry_size = len(response)
 
@@ -258,7 +260,8 @@ class RequestHandler:
 
         cached = self._cache.get(
             width, height, pixel_hash, output_mode,
-            despill, despeckle, refiner, matte_cleanup, hint_hash, quality_mode,
+            despill, despeckle, refiner, matte_cleanup,
+            hint_hash, quality_mode, brightness,
         )
         if cached is not None:
             logger.info("Cache HIT (%s)", self._cache.stats["hit_rate"])
@@ -277,7 +280,7 @@ class RequestHandler:
                 self._cache.put(
                     width, height, pixel_hash, output_mode,
                     despill, despeckle, refiner, matte_cleanup,
-                    result, hint_hash, quality_mode,
+                    result, hint_hash, quality_mode, brightness,
                 )
                 logger.info("Cached frame (%d entries, %s)",
                              self._cache.stats["entries"],
@@ -290,7 +293,7 @@ class RequestHandler:
             self._cache.put(
                 width, height, pixel_hash, output_mode,
                 despill, despeckle, refiner, matte_cleanup,
-                result, hint_hash, quality_mode,
+                result, hint_hash, quality_mode, brightness,
             )
         return result
 
