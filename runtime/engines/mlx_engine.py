@@ -118,7 +118,6 @@ class MLXEngine(InferenceEngine):
             )
 
         self._current_mode_tiled = tiled
-        self._model_path = model_path
         logger.info("CorridorKey MLX model loaded successfully")
 
     def is_ready(self) -> bool:
