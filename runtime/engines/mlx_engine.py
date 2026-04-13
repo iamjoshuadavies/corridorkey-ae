@@ -155,19 +155,31 @@ class MLXEngine(InferenceEngine):
             else:
                 logger.info("Using external alpha hint (%dx%d)", alpha_hint.shape[1], alpha_hint.shape[0])
 
-            # Run inference
+            # Run inference (despill/despeckle handled by our postprocess, not upstream)
             result = self._engine.process_frame(
                 image=rgb,
                 mask_linear=alpha_hint,
                 refiner_scale=request.refiner,
-                despill_strength=request.despill,
-                auto_despeckle=request.despeckle > 0.1,
+                despill_strength=0.0,       # We handle despill ourselves
+                auto_despeckle=False,       # We handle despeckle ourselves
             )
 
-            # Build output based on requested mode
             alpha = result["alpha"]     # (H, W) uint8
             fg = result["fg"]          # (H, W, 3) uint8
-            comp = result["comp"]      # (H, W, 3) uint8
+
+            # Apply our post-processing (despill, despeckle, matte cleanup)
+            from engines.postprocess import apply_postprocessing
+            alpha, fg = apply_postprocessing(
+                alpha, fg,
+                despill_strength=request.despill,
+                despeckle_strength=request.despeckle,
+                matte_cleanup_strength=request.matte_cleanup,
+            )
+
+            # Recompute composite after postprocessing
+            alpha_3ch = alpha[:, :, np.newaxis].astype(np.float32) / 255.0
+            fg_float = fg.astype(np.float32)
+            comp = (fg_float * alpha_3ch).astype(np.uint8)
 
             # Debug: save intermediate results (enable with CK_DEBUG=1 env var)
             if os.environ.get("CK_DEBUG"):
