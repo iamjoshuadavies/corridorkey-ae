@@ -22,8 +22,7 @@ enum ParamID : A_long {
     PARAM_OUTPUT_MODE,          // Processed / Matte / Foreground / Composite
     PARAM_ALPHA_HINT_LAYER,     // Layer: external alpha matte input
     PARAM_DEVICE,               // Auto / CPU / GPU
-    PARAM_QUALITY_MODE,         // Quality / Performance
-    PARAM_LOW_MEMORY_MODE,
+    PARAM_QUALITY_MODE,         // Resolution preset
     PARAM_DESPILL_STRENGTH,
     PARAM_DESPECKLE_STRENGTH,
     PARAM_REFINER_STRENGTH,

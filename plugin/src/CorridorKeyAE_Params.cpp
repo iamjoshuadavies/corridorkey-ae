@@ -65,16 +65,6 @@ A_Err SetupParams(PF_InData* in_data, PF_OutData* out_data)
         PARAM_QUALITY_MODE
     );
 
-    // --- Low Memory Mode ---
-    AEFX_CLR_STRUCT(def);
-    PF_ADD_CHECKBOX(
-        "Low Memory Mode",
-        "Enable",
-        FALSE,
-        0,
-        PARAM_LOW_MEMORY_MODE
-    );
-
     // --- Despill Strength ---
     AEFX_CLR_STRUCT(def);
     PF_ADD_FLOAT_SLIDERX(
