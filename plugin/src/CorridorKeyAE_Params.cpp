@@ -46,14 +46,18 @@ A_Err SetupParams(PF_InData* in_data, PF_OutData* out_data)
     );
 
     // --- Device ---
+    // Hidden on Mac (always MLX). Kept in param list for project compatibility with Windows.
     AEFX_CLR_STRUCT(def);
-    PF_ADD_POPUP(
-        "Device",
-        3,
-        1,
-        "Auto|CPU|GPU",
-        PARAM_DEVICE
-    );
+    def.param_type = PF_Param_POPUP;
+    PF_STRNNCPY(def.PF_DEF_NAME, "Device", sizeof(def.PF_DEF_NAME));
+    def.u.pd.num_choices = 3;
+    def.u.pd.dephault = 1;
+    def.u.pd.u.namesptr = "Auto|CPU|GPU";
+#ifdef __MACH__
+    def.ui_flags = PF_PUI_INVISIBLE;
+#endif
+    def.uu.id = PARAM_DEVICE;
+    if ((err = PF_ADD_PARAM(in_data, -1, &def)) != PF_Err_NONE) return err;
 
     // --- Quality Mode ---
     AEFX_CLR_STRUCT(def);
