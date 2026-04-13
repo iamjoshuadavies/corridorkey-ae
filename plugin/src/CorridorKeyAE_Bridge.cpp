@@ -213,19 +213,23 @@ struct RuntimeBridge::Impl {
         std::string root = FindRepoRoot();
         if (root.empty()) return false;
 
-        std::string python = root + "/runtime/.venv/bin/python3";
         std::string runtime_dir = root + "/runtime";
 
-        // Check python exists
-        if (access(python.c_str(), X_OK) != 0) {
-            // Try system python
-            python = "/opt/homebrew/bin/python3.12";
-            if (access(python.c_str(), X_OK) != 0) {
-                python = "/usr/local/bin/python3";
-                if (access(python.c_str(), X_OK) != 0) {
-                    return false;
-                }
-            }
+        // The venv python MUST be used (not resolved to system python)
+        // because Python detects its venv from its own path, which makes
+        // the venv's site-packages available automatically.
+        std::string python = root + "/runtime/.venv/bin/python3";
+
+        // Resolve symlink for the access check, but execute the venv path
+        char resolved_python[PATH_MAX];
+        bool venv_ok = false;
+        if (realpath(python.c_str(), resolved_python)) {
+            venv_ok = (access(resolved_python, X_OK) == 0);
+        }
+
+        if (!venv_ok) {
+            // Venv not found — can't run without it (no corridorkey_mlx)
+            return false;
         }
 
         // Create pipe for reading stdout (to get PORT:XXXX)
@@ -248,8 +252,9 @@ struct RuntimeBridge::Impl {
             // Change to runtime directory
             chdir(runtime_dir.c_str());
 
-            // Exec the runtime server
-            execl(python.c_str(), "python3", "-m", "server.main",
+            // Exec the runtime server using the venv python
+            // argv[0] must be the full path so Python detects its venv
+            execl(python.c_str(), python.c_str(), "-m", "server.main",
                   "--port", "0", // Auto-assign port
                   "--tile-size", "512",
                   nullptr);
