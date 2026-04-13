@@ -36,6 +36,7 @@
     #include <poll.h>
     #include <mach-o/dyld.h>
     #include <dlfcn.h>
+    #include <limits.h>
     typedef int socket_t;
     #define INVALID_SOCK (-1)
     #define CLOSE_SOCKET close
@@ -109,22 +110,26 @@ static bool RecvMessage(socket_t sock, std::vector<uint8_t>& payload) {
 
 #ifndef _WIN32
 static std::string GetPluginBundlePath() {
-    // Get the path of the running plugin binary
-    // On macOS, _NSGetExecutablePath gives us the AE host path, not the plugin.
-    // Instead, use dladdr to find the address of a function in our dylib.
     Dl_info info;
     if (dladdr(reinterpret_cast<void*>(&GetPluginBundlePath), &info) && info.dli_fname) {
-        std::string path = info.dli_fname;
-        // path = .../CorridorKey.plugin/Contents/MacOS/CorridorKey
-        // We want the repo root: go up from build/plugin/CorridorKey.plugin/Contents/MacOS/
+        // Resolve symlinks to get the real path (AE loads via symlink)
+        char resolved[PATH_MAX];
+        std::string path;
+        if (realpath(info.dli_fname, resolved)) {
+            path = resolved;
+        } else {
+            path = info.dli_fname;
+        }
+        // path = .../corridorkey-ae/build/plugin/CorridorKey.plugin/Contents/MacOS/CorridorKey
+        // We want the repo root: strip /build/plugin/...
         auto pos = path.rfind("/build/plugin/");
         if (pos != std::string::npos) {
             return path.substr(0, pos);
         }
-        // Fallback: try to find the plugin bundle root
+        // Fallback
         pos = path.rfind(".plugin/");
         if (pos != std::string::npos) {
-            return path.substr(0, pos + 7); // includes .plugin
+            return path.substr(0, pos + 7);
         }
     }
     return "";
