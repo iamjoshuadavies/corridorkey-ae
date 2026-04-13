@@ -421,7 +421,7 @@ bool RuntimeBridge::ProcessFrame(const FrameRequest& request, FrameResponse& res
     // "FRAME" (5) + width(4) + height(4) + rowbytes(4)
     // + output_mode(1) + despill(4f) + despeckle(4f) + refiner(4f) + matte_cleanup(4f)
     // + brightness(4f) + quality_mode(1) + has_hint(1) + [hint dims] + pixel_data + [hint data]
-    size_t header_size = 5 + 4 + 4 + 4 + 1 + 4 + 4 + 4 + 4 + 4 + 1 + 1; // 44 bytes base
+    size_t header_size = 5 + 4 + 4 + 4 + 1 + 4 + 4 + 4 + 4 + 4 + 1 + 1; // 40 bytes base
     size_t hint_header_size = 0;
     if (request.has_alpha_hint) {
         hint_header_size = 4 + 4 + 4;

@@ -124,7 +124,7 @@ class FrameCache:
 #   + has_hint(1) + [hint_width(4) + hint_height(4) + hint_rowbytes(4)]
 #   + pixel_data + [hint_pixel_data]
 FRAME_MAGIC = b"FRAME"
-FRAME_HEADER_BASE = 5 + 4 + 4 + 4 + 1 + 4 + 4 + 4 + 4 + 4 + 1 + 1  # 44 bytes
+FRAME_HEADER_BASE = 5 + 4 + 4 + 4 + 1 + 4 + 4 + 4 + 4 + 4 + 1 + 1  # 40 bytes
 # Legacy header without params (M2 compat)
 FRAME_HEADER_SIZE_LEGACY = 5 + 4 + 4 + 4  # 17 bytes
 
@@ -269,7 +269,8 @@ class RequestHandler:
             result = self._process_with_engine(
                 width, height, rowbytes, pixel_data,
                 output_mode, despill, despeckle, refiner, matte_cleanup,
-                hint_data, hint_width, hint_height, hint_rowbytes, quality_mode,
+                hint_data, hint_width, hint_height, hint_rowbytes,
+                quality_mode, brightness,
             )
             # Cache successful results (don't cache errors)
             if result[:5] == FRAME_MAGIC:
@@ -299,7 +300,7 @@ class RequestHandler:
         refiner: float, matte_cleanup: float,
         hint_data: Optional[bytes] = None,
         hint_width: int = 0, hint_height: int = 0, hint_rowbytes: int = 0,
-        quality_mode: int = 0,
+        quality_mode: int = 0, brightness: float = 1.0,
     ) -> bytes:
         """Process a frame through the real inference engine."""
         try:
