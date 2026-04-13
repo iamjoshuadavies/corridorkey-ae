@@ -67,6 +67,9 @@ class MLXEngine(InferenceEngine):
     Switches between tiled and direct mode on demand.
     Only one engine instance in memory at a time to conserve RAM.
     Reinitializes when the mode changes.
+
+    Caches raw model output (alpha + fg) so that changing post-processing
+    params (despill, despeckle, matte cleanup) doesn't re-run inference.
     """
 
     def __init__(
@@ -81,6 +84,12 @@ class MLXEngine(InferenceEngine):
         self._overlap = overlap
         self._use_refiner = use_refiner
         self._current_mode_tiled: Optional[bool] = None  # Track current mode
+
+        # Raw model output cache: avoids re-running inference when only
+        # post-processing params change. Keyed by (pixel_hash, refiner, tiled).
+        self._raw_cache_key: Optional[str] = None
+        self._raw_cache_alpha: Optional[np.ndarray] = None
+        self._raw_cache_fg: Optional[np.ndarray] = None
 
     def load_model(self, model_path: str) -> None:
         """Load the CorridorKey MLX model in tiled mode (default)."""
@@ -147,27 +156,46 @@ class MLXEngine(InferenceEngine):
             rgb[:, :, 1] = argb[:, :, 2]  # G
             rgb[:, :, 2] = argb[:, :, 3]  # B
 
-            # Alpha hint: use external hint from AE if available, else white (full frame)
-            alpha_hint = getattr(request, '_alpha_hint', None)
-            if alpha_hint is None:
-                alpha_hint = np.full((h, w), 255, dtype=np.uint8)
-                logger.debug("No alpha hint provided — using full-frame white mask")
+            # Build cache key for raw model output: pixel content + refiner + mode
+            # Post-processing params (despill, despeckle, cleanup) are NOT in this key
+            import hashlib
+            pixel_sample = rgb[:4].tobytes() + rgb[-4:].tobytes()
+            raw_key = hashlib.md5(
+                pixel_sample + f":{request.refiner:.3f}:{use_tiled}:{h}:{w}".encode()
+            ).hexdigest()
+
+            # Check raw cache — skip inference if same frame + refiner
+            if raw_key == self._raw_cache_key and self._raw_cache_alpha is not None:
+                alpha = self._raw_cache_alpha.copy()
+                fg = self._raw_cache_fg.copy()
+                logger.info("Raw model cache HIT — skipping inference, applying post-processing only")
             else:
-                logger.info("Using external alpha hint (%dx%d)", alpha_hint.shape[1], alpha_hint.shape[0])
+                # Alpha hint
+                alpha_hint = getattr(request, '_alpha_hint', None)
+                if alpha_hint is None:
+                    alpha_hint = np.full((h, w), 255, dtype=np.uint8)
+                else:
+                    logger.info("Using external alpha hint (%dx%d)", alpha_hint.shape[1], alpha_hint.shape[0])
 
-            # Run inference (despill/despeckle handled by our postprocess, not upstream)
-            result = self._engine.process_frame(
-                image=rgb,
-                mask_linear=alpha_hint,
-                refiner_scale=request.refiner,
-                despill_strength=0.0,       # We handle despill ourselves
-                auto_despeckle=False,       # We handle despeckle ourselves
-            )
+                # Run inference
+                result = self._engine.process_frame(
+                    image=rgb,
+                    mask_linear=alpha_hint,
+                    refiner_scale=request.refiner,
+                    despill_strength=0.0,
+                    auto_despeckle=False,
+                )
 
-            alpha = result["alpha"]     # (H, W) uint8
-            fg = result["fg"]          # (H, W, 3) uint8
+                alpha = result["alpha"]     # (H, W) uint8
+                fg = result["fg"]          # (H, W, 3) uint8
 
-            # Apply our post-processing (despill, despeckle, matte cleanup)
+                # Cache raw output
+                self._raw_cache_key = raw_key
+                self._raw_cache_alpha = alpha.copy()
+                self._raw_cache_fg = fg.copy()
+                logger.info("Raw model output cached")
+
+            # Apply post-processing (cheap — ~10ms)
             from engines.postprocess import apply_postprocessing
             alpha, fg = apply_postprocessing(
                 alpha, fg,
