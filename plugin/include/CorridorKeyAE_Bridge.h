@@ -95,6 +95,7 @@ struct FrameRequest {
     float despeckle = 0.0f;
     float refiner = 0.5f;
     float matte_cleanup = 0.0f;
+    float brightness = 1.0f;
 };
 
 struct FrameResponse {

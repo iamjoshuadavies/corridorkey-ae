@@ -46,7 +46,8 @@ def _build_frame_msg(width, height, pixels, output_mode=0, has_hint=False,
     msg += struct.pack(">f", 0.0)               # despeckle
     msg += struct.pack(">f", 0.5)               # refiner
     msg += struct.pack(">f", 0.0)               # matte_cleanup
-    msg += struct.pack("B", 0)                      # quality_mode (0=tiled512)
+    msg += struct.pack(">f", 1.0)               # brightness
+    msg += struct.pack("B", 3)                      # quality_mode (3=tiled)
     msg += struct.pack("B", 1 if has_hint else 0)  # has_hint
     if has_hint:
         hint_rowbytes = hint_width * 4

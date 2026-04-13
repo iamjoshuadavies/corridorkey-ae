@@ -22,6 +22,7 @@ class InferenceRequest:
     despeckle: float = 0.0
     refiner: float = 0.5
     matte_cleanup: float = 0.0
+    brightness: float = 1.0
     float_output: bool = False      # Future: return float32 instead of uint8
 
 

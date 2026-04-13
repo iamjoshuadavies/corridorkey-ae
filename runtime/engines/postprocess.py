@@ -111,6 +111,7 @@ def apply_postprocessing(
     despill_strength: float = 0.5,
     despeckle_strength: float = 0.0,
     matte_cleanup_strength: float = 0.0,
+    brightness: float = 1.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Apply all post-processing to keyed output.
 
@@ -154,6 +155,10 @@ def apply_postprocessing(
     # 3. Despill (green removal from foreground)
     if despill_strength > 0.05:
         fg_f = despill(fg_f, strength=despill_strength, mode="average")
+
+    # 4. Brightness (RGB multiplier, 1.0 = no change)
+    if abs(brightness - 1.0) > 0.01:
+        fg_f = np.clip(fg_f * brightness, 0.0, 1.0)
 
     # Convert back to uint8
     alpha_out = np.clip(alpha_f * 255.0, 0, 255).astype(np.uint8)

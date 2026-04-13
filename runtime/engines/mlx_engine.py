@@ -202,6 +202,7 @@ class MLXEngine(InferenceEngine):
                 despill_strength=request.despill,
                 despeckle_strength=request.despeckle,
                 matte_cleanup_strength=request.matte_cleanup,
+                brightness=request.brightness,
             )
 
             # Recompute composite after postprocessing
