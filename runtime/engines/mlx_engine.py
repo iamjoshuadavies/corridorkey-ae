@@ -157,7 +157,7 @@ class MLXEngine(InferenceEngine):
             rgb[:, :, 2] = argb[:, :, 3]  # B
 
             # Build cache key for raw model output: pixel content + refiner + mode + hint
-            # Post-processing params (despill, despeckle, cleanup, brightness) are NOT in this key
+            # Post-processing params (despill, despeckle, cleanup) are NOT in this key
             import hashlib
             alpha_hint = getattr(request, '_alpha_hint', None)
             pixel_sample = rgb[:4].tobytes() + rgb[-4:].tobytes()
@@ -206,7 +206,6 @@ class MLXEngine(InferenceEngine):
                 despill_strength=request.despill,
                 despeckle_strength=request.despeckle,
                 matte_cleanup_strength=request.matte_cleanup,
-                brightness=request.brightness,
             )
 
             # Recompute composite after postprocessing

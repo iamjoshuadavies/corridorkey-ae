@@ -470,14 +470,13 @@ A_Err SmartRender(
 
         // Read effect params
         PF_ParamDef mode_param, quality_param, despill_param, despeckle_param,
-                    refiner_param, cleanup_param, brightness_param;
+                    refiner_param, cleanup_param;
         AEFX_CLR_STRUCT(mode_param);
         AEFX_CLR_STRUCT(quality_param);
         AEFX_CLR_STRUCT(despill_param);
         AEFX_CLR_STRUCT(despeckle_param);
         AEFX_CLR_STRUCT(refiner_param);
         AEFX_CLR_STRUCT(cleanup_param);
-        AEFX_CLR_STRUCT(brightness_param);
 
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_OUTPUT_MODE, in_data->current_time,
                               in_data->time_step, in_data->time_scale, &mode_param));
@@ -491,8 +490,6 @@ A_Err SmartRender(
                               in_data->time_step, in_data->time_scale, &refiner_param));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_MATTE_CLEANUP, in_data->current_time,
                               in_data->time_step, in_data->time_scale, &cleanup_param));
-        ERR(PF_CHECKOUT_PARAM(in_data, PARAM_BRIGHTNESS, in_data->current_time,
-                              in_data->time_step, in_data->time_scale, &brightness_param));
 
         if (!err) {
             request.output_mode = mode_param.u.pd.value - 1;
@@ -501,7 +498,6 @@ A_Err SmartRender(
             request.despeckle = despeckle_param.u.fs_d.value;
             request.refiner = refiner_param.u.fs_d.value;
             request.matte_cleanup = cleanup_param.u.fs_d.value;
-            request.brightness = brightness_param.u.fs_d.value;
         }
 
         ERR2(PF_CHECKIN_PARAM(in_data, &mode_param));
@@ -510,7 +506,6 @@ A_Err SmartRender(
         ERR2(PF_CHECKIN_PARAM(in_data, &despeckle_param));
         ERR2(PF_CHECKIN_PARAM(in_data, &refiner_param));
         ERR2(PF_CHECKIN_PARAM(in_data, &cleanup_param));
-        ERR2(PF_CHECKIN_PARAM(in_data, &brightness_param));
 
         // Try to checkout alpha hint pixels
         PF_EffectWorld* hint_world = nullptr;

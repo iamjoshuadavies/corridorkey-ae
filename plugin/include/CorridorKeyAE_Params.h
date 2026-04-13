@@ -27,7 +27,6 @@ enum ParamID : A_long {
     PARAM_DESPECKLE_STRENGTH,
     PARAM_REFINER_STRENGTH,
     PARAM_MATTE_CLEANUP,
-    PARAM_BRIGHTNESS,           // Debug: RGB brightness (post-process test)
 
     PARAM_COUNT
 };

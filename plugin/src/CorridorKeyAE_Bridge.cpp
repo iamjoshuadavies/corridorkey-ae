@@ -420,8 +420,8 @@ bool RuntimeBridge::ProcessFrame(const FrameRequest& request, FrameResponse& res
     // Build the frame message (extended format with params + optional alpha hint):
     // "FRAME" (5) + width(4) + height(4) + rowbytes(4)
     // + output_mode(1) + despill(4f) + despeckle(4f) + refiner(4f) + matte_cleanup(4f)
-    // + brightness(4f) + quality_mode(1) + has_hint(1) + [hint dims] + pixel_data + [hint data]
-    size_t header_size = 5 + 4 + 4 + 4 + 1 + 4 + 4 + 4 + 4 + 4 + 1 + 1; // 40 bytes base
+    // + quality_mode(1) + has_hint(1) + [hint dims] + pixel_data + [hint data]
+    size_t header_size = 5 + 4 + 4 + 4 + 1 + 4 + 4 + 4 + 4 + 1 + 1; // 36 bytes base
     size_t hint_header_size = 0;
     if (request.has_alpha_hint) {
         hint_header_size = 4 + 4 + 4;
@@ -448,11 +448,10 @@ bool RuntimeBridge::ProcessFrame(const FrameRequest& request, FrameResponse& res
     writeFloat(payload.data() + 22, request.despeckle);
     writeFloat(payload.data() + 26, request.refiner);
     writeFloat(payload.data() + 30, request.matte_cleanup);
-    writeFloat(payload.data() + 34, request.brightness);
-    payload[38] = static_cast<uint8_t>(request.quality_mode);
-    payload[39] = request.has_alpha_hint ? 1 : 0;
+    payload[34] = static_cast<uint8_t>(request.quality_mode);
+    payload[35] = request.has_alpha_hint ? 1 : 0;
 
-    size_t offset = 40;
+    size_t offset = 36;
     if (request.has_alpha_hint) {
         WriteU32BE(payload.data() + offset, request.hint_width);
         WriteU32BE(payload.data() + offset + 4, request.hint_height);

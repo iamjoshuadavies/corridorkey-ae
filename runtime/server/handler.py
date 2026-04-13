@@ -45,11 +45,11 @@ class FrameCache:
         output_mode: int, despill: float, despeckle: float,
         refiner: float, matte_cleanup: float,
         hint_hash: Optional[str] = None,
-        quality_mode: int = 0, brightness: float = 1.0,
+        quality_mode: int = 0,
     ) -> str:
         """Build a cache key from frame dimensions, content hash, and ALL params."""
         parts = f"{width}:{height}:{pixel_hash}:{output_mode}:{quality_mode}:"
-        parts += f"{despill:.3f}:{despeckle:.3f}:{refiner:.3f}:{matte_cleanup:.3f}:{brightness:.3f}"
+        parts += f"{despill:.3f}:{despeckle:.3f}:{refiner:.3f}:{matte_cleanup:.3f}"
         if hint_hash:
             parts += f":{hint_hash}"
         return parts
@@ -71,12 +71,12 @@ class FrameCache:
         output_mode: int, despill: float, despeckle: float,
         refiner: float, matte_cleanup: float,
         hint_hash: Optional[str] = None,
-        quality_mode: int = 0, brightness: float = 1.0,
+        quality_mode: int = 0,
     ) -> Optional[bytes]:
         key = self._make_key(
             width, height, pixel_hash, output_mode,
             despill, despeckle, refiner, matte_cleanup, hint_hash,
-            quality_mode, brightness,
+            quality_mode,
         )
         if key in self._cache:
             self._hits += 1
@@ -91,12 +91,12 @@ class FrameCache:
         refiner: float, matte_cleanup: float,
         response: bytes,
         hint_hash: Optional[str] = None,
-        quality_mode: int = 0, brightness: float = 1.0,
+        quality_mode: int = 0,
     ) -> None:
         key = self._make_key(
             width, height, pixel_hash, output_mode,
             despill, despeckle, refiner, matte_cleanup, hint_hash,
-            quality_mode, brightness,
+            quality_mode,
         )
         entry_size = len(response)
 
@@ -126,7 +126,7 @@ class FrameCache:
 #   + has_hint(1) + [hint_width(4) + hint_height(4) + hint_rowbytes(4)]
 #   + pixel_data + [hint_pixel_data]
 FRAME_MAGIC = b"FRAME"
-FRAME_HEADER_BASE = 5 + 4 + 4 + 4 + 1 + 4 + 4 + 4 + 4 + 4 + 1 + 1  # 40 bytes
+FRAME_HEADER_BASE = 5 + 4 + 4 + 4 + 1 + 4 + 4 + 4 + 4 + 1 + 1  # 36 bytes
 # Legacy header without params (M2 compat)
 FRAME_HEADER_SIZE_LEGACY = 5 + 4 + 4 + 4  # 17 bytes
 
@@ -214,11 +214,10 @@ class RequestHandler:
             despeckle = struct.unpack(">f", data[22:26])[0]
             refiner = struct.unpack(">f", data[26:30])[0]
             matte_cleanup = struct.unpack(">f", data[30:34])[0]
-            brightness = struct.unpack(">f", data[34:38])[0]
-            quality_mode = data[38]  # 0=256, 1=512, 2=1024, 3=tiled
-            has_hint = data[39] != 0
+            quality_mode = data[34]  # 0=256, 1=512, 2=1024, 3=tiled
+            has_hint = data[35] != 0
 
-            offset = 40
+            offset = 36
             if has_hint:
                 hint_width = struct.unpack(">I", data[offset:offset+4])[0]
                 hint_height = struct.unpack(">I", data[offset+4:offset+8])[0]
@@ -240,7 +239,6 @@ class RequestHandler:
             despeckle = 0.0
             refiner = 0.5
             matte_cleanup = 0.0
-            brightness = 1.0
             quality_mode = 3
             pixel_data = data[FRAME_HEADER_SIZE_LEGACY:]
 
@@ -261,7 +259,7 @@ class RequestHandler:
         cached = self._cache.get(
             width, height, pixel_hash, output_mode,
             despill, despeckle, refiner, matte_cleanup,
-            hint_hash, quality_mode, brightness,
+            hint_hash, quality_mode,
         )
         if cached is not None:
             logger.info("Cache HIT (%s)", self._cache.stats["hit_rate"])
@@ -273,14 +271,14 @@ class RequestHandler:
                 width, height, rowbytes, pixel_data,
                 output_mode, despill, despeckle, refiner, matte_cleanup,
                 hint_data, hint_width, hint_height, hint_rowbytes,
-                quality_mode, brightness,
+                quality_mode,
             )
             # Cache successful results (don't cache errors)
             if result[:5] == FRAME_MAGIC:
                 self._cache.put(
                     width, height, pixel_hash, output_mode,
                     despill, despeckle, refiner, matte_cleanup,
-                    result, hint_hash, quality_mode, brightness,
+                    result, hint_hash, quality_mode,
                 )
                 logger.info("Cached frame (%d entries, %s)",
                              self._cache.stats["entries"],
@@ -293,7 +291,7 @@ class RequestHandler:
             self._cache.put(
                 width, height, pixel_hash, output_mode,
                 despill, despeckle, refiner, matte_cleanup,
-                result, hint_hash, quality_mode, brightness,
+                result, hint_hash, quality_mode,
             )
         return result
 
@@ -303,7 +301,7 @@ class RequestHandler:
         refiner: float, matte_cleanup: float,
         hint_data: Optional[bytes] = None,
         hint_width: int = 0, hint_height: int = 0, hint_rowbytes: int = 0,
-        quality_mode: int = 0, brightness: float = 1.0,
+        quality_mode: int = 0,
     ) -> bytes:
         """Process a frame through the real inference engine."""
         try:
@@ -370,7 +368,6 @@ class RequestHandler:
                 despeckle=despeckle,
                 refiner=refiner,
                 matte_cleanup=matte_cleanup,
-                brightness=brightness,
             )
             # Attach the alpha hint and quality mode to the request
             request._alpha_hint = alpha_hint_image  # type: ignore[attr-defined]

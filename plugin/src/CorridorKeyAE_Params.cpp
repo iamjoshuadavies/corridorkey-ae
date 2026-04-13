@@ -113,18 +113,6 @@ A_Err SetupParams(PF_InData* in_data, PF_OutData* out_data)
         PARAM_MATTE_CLEANUP
     );
 
-    // --- Brightness (debug/test) ---
-    AEFX_CLR_STRUCT(def);
-    PF_ADD_FLOAT_SLIDERX(
-        "Brightness",
-        0.0, 2.0,
-        0.0, 2.0,
-        1.0,                // Default 1.0 = no change
-        PF_Precision_HUNDREDTHS,
-        0, 0,
-        PARAM_BRIGHTNESS
-    );
-
     out_data->num_params = PARAM_COUNT;
 
     return err;
