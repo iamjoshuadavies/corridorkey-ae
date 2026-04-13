@@ -48,12 +48,12 @@ enum class DeviceMode : A_long {
 };
 
 // --- Quality modes (model tile/resolution) ---
-// Values are 1-indexed for AE popup (subtract 1 for actual index)
+// Order: fastest to highest quality. Values are 0-indexed after AE popup -1.
 enum class QualityMode : A_long {
-    Tiled512 = 0,       // Full-res tiled (default, ~5s/frame 1080p)
+    Direct256 = 0,      // Downscale to 256, fastest
     Direct512,          // Downscale to 512, fast (~0.3s)
-    Direct256,          // Downscale to 256, fastest
     Direct1024,         // Downscale to 1024 (slower)
+    Tiled512,           // Full-res tiled (best quality, ~5s/frame 1080p)
 };
 
 // --- Alpha modes ---

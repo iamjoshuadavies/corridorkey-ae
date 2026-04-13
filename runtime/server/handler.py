@@ -239,8 +239,8 @@ class RequestHandler:
             matte_cleanup = 0.0
             pixel_data = data[FRAME_HEADER_SIZE_LEGACY:]
 
-        # Quality mode names for logging
-        quality_names = {0: "tiled512", 1: "512", 2: "256", 3: "1024"}
+        # Quality mode names for logging (ordered: fastest → best)
+        quality_names = {0: "256", 1: "512", 2: "1024", 3: "tiled512"}
         logger.info("Frame %dx%d mode=%d quality=%s (despill=%.2f refiner=%.2f hint=%s)",
                      width, height, output_mode,
                      quality_names.get(quality_mode, "?"),
@@ -309,9 +309,9 @@ class RequestHandler:
                 argb = full[:, :width * 4].reshape((height, width, 4))
 
             # Quality mode scaling for non-tiled modes
-            # 0 = tiled (full res, handled by engine), 1 = 512, 2 = 256, 3 = 1024
+            # 0 = 256, 1 = 512, 2 = 1024, 3 = tiled (full res)
             original_h, original_w = height, width
-            target_size = {1: 512, 2: 256, 3: 1024}.get(quality_mode)
+            target_size = {0: 256, 1: 512, 2: 1024}.get(quality_mode)
 
             if target_size and (width > target_size or height > target_size):
                 # Downscale preserving aspect ratio
@@ -366,7 +366,7 @@ class RequestHandler:
             )
             # Attach the alpha hint and quality mode to the request
             request._alpha_hint = alpha_hint_image  # type: ignore[attr-defined]
-            request._use_direct = (quality_mode != 0)  # type: ignore[attr-defined]
+            request._use_direct = (quality_mode != 3)  # type: ignore[attr-defined]
 
             # Run inference
             t0 = time.perf_counter()
