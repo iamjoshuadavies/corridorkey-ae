@@ -85,10 +85,7 @@ struct FrameRequest {
 
     // Parameters
     int32_t output_mode = 0;
-    int32_t device_mode = 0;
     int32_t quality_mode = 0;
-    bool low_memory = false;
-    int32_t tile_size = 512;
 
     // Cleanup
     float despill = 0.5f;

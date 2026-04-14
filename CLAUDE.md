@@ -131,7 +131,7 @@ launcher chain swallows stdout before it reaches the parent's pipe).
 - Custom Drawbot UI: logo, title, tagline, clickable About link
 - Alpha hint layer input (PF_ADD_LAYER)
 - Output modes: Processed, Matte, Foreground, Composite
-- Effect params: Device, Quality, Low Memory, Despill, Despeckle, Refiner, Matte Cleanup
+- Effect params: Output Mode, Alpha Hint, Quality, Despill, Despeckle, Refiner, Matte Cleanup
 - Tiled inference for full-resolution output
 - Debug image saves gated behind CK_DEBUG=1 env var
 
