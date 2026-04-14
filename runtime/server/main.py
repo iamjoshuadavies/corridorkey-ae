@@ -21,31 +21,54 @@ logger = logging.getLogger("corridorkey.runtime")
 
 
 def create_engine(model_path: Optional[str] = None, tile_size: int = 512) -> Optional[InferenceEngine]:
-    """Create and load the best available inference engine."""
+    """Create and load the best available inference engine.
 
-    # Try MLX first (Apple Silicon)
+    Order of preference:
+      1. MLX (Apple Silicon, fast on M-series with unified memory)
+      2. PyTorch (CUDA on Windows/Linux with NVIDIA GPU; CPU fallback)
+    """
+
+    # --- 1. MLX (Apple Silicon) ---
     try:
         from engines.mlx_engine import MLXEngine, find_model_weights
 
-        # Find model weights
         if model_path is None:
             weights = find_model_weights()
-            if weights is None:
-                logger.warning("No MLX model weights found — running without inference")
-                return None
-            model_path = str(weights)
-
-        engine = MLXEngine(tile_size=tile_size, use_refiner=True)
-        engine.load_model(model_path)
-        logger.info("MLX engine ready: %s", engine.device_name)
-        return engine
-
+            if weights is not None:
+                engine = MLXEngine(tile_size=tile_size, use_refiner=True)
+                engine.load_model(str(weights))
+                logger.info("MLX engine ready: %s", engine.device_name)
+                return engine
+            logger.info("No MLX model weights found — falling through to PyTorch")
+        else:
+            engine = MLXEngine(tile_size=tile_size, use_refiner=True)
+            engine.load_model(model_path)
+            logger.info("MLX engine ready: %s", engine.device_name)
+            return engine
     except ImportError:
         logger.info("corridorkey_mlx not available, skipping MLX engine")
     except Exception:
         logger.exception("Failed to initialize MLX engine")
 
-    # TODO: Try PyTorch engine (CUDA/MPS)
+    # --- 2. PyTorch (CUDA on Windows/Linux, CPU fallback) ---
+    try:
+        from engines.pytorch_engine import PyTorchEngine, find_pytorch_checkpoint
+
+        pt_weights = Path(model_path) if model_path else find_pytorch_checkpoint()
+        if pt_weights is None or not pt_weights.exists():
+            logger.warning(
+                "No PyTorch checkpoint found. Set EZ_CORRIDORKEY_PATH or "
+                "install EZ-CorridorKey to ~/Desktop/EZ-CorridorKey."
+            )
+        else:
+            engine = PyTorchEngine(use_refiner=True, prefer_fp16=True)
+            engine.load_model(str(pt_weights))
+            logger.info("PyTorch engine ready: %s", engine.device_name)
+            return engine
+    except ImportError as e:
+        logger.info("PyTorch engine unavailable: %s", e)
+    except Exception:
+        logger.exception("Failed to initialize PyTorch engine")
 
     logger.warning("No inference engine available — running in mock mode")
     return None

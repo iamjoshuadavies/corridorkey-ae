@@ -81,11 +81,25 @@ also still parses `PORT:<n>` from the child's stdout pipe as a fallback
 launcher chain swallows stdout before it reaches the parent's pipe).
 
 ### Inference Pipeline
-- Model: CorridorKey via `corridorkey_mlx` package (pip from GitHub)
-- Mode: **Tiled inference** (tile_size=512, overlap=64) for full-resolution output
-- Performance: ~4.6s/frame at 1920×1080 on M1, ~0.3s at 512×512
-- Model weights: `~/Library/Application Support/EZ-CorridorKey/CorridorKeyModule/checkpoints/corridorkey_mlx.safetensors`
-- img_size=2048 is NOT viable on M1 (~450s/frame). Tiled mode at 512 is the correct approach.
+- macOS: **MLX engine** via `corridorkey_mlx` package (pip from GitHub).
+  Tiled inference (tile_size=512, overlap=64). ~4.6s/frame at 1080p,
+  ~0.3s at 512×512. Weights at
+  `~/Library/Application Support/EZ-CorridorKey/CorridorKeyModule/checkpoints/corridorkey_mlx.safetensors`.
+  img_size=2048 is NOT viable on M1 (~450s/frame).
+- Windows: **PyTorch engine** (`runtime/engines/pytorch_engine.py`).
+  Loads `GreenFormer` from EZ-CorridorKey's
+  `_internal/CorridorKeyModule/core/model_transformer.py` via
+  `importlib.util` at runtime — never copied or redistributed. Loads
+  `CorridorKey_v1.0.pth` from
+  `~/Desktop/EZ-CorridorKey/CorridorKeyModule/checkpoints/`. Always pads
+  to 2048×2048 (the only size the checkpoint's pos_embed accepts) — no
+  tiling. ~400ms per frame on RTX 4090 fp16 (~3.2GB peak VRAM).
+  Discovery via `EZ_CORRIDORKEY_PATH` env var or the Desktop default.
+- Both engines apply ImageNet normalization to RGB inputs (mean
+  `[0.485, 0.456, 0.406]`, std `[0.229, 0.224, 0.225]`). Skipping this
+  is what produces washed-out / "milky" foreground output — the Hiera
+  backbone needs the normalized distribution. The alpha-hint channel
+  is NOT normalized (it's a mask, not color data).
 
 ## Key Conventions
 - CMake 3.15+ for all C++ builds

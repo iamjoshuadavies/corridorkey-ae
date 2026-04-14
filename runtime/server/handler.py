@@ -384,11 +384,15 @@ class RequestHandler:
                 hint_g = hint_argb[:, :, 2].astype(np.float32)
                 hint_b = hint_argb[:, :, 3].astype(np.float32)
                 alpha_hint_image = ((hint_r * 0.299 + hint_g * 0.587 + hint_b * 0.114)).astype(np.uint8)
-                # Resize hint to match input if needed
-                if alpha_hint_image.shape[:2] != (height, width):
+                # Resize hint to match the (possibly downscaled) input.
+                # Use argb's actual shape, not the original (width, height) —
+                # those are stale if a quality-mode downscale happened above.
+                target_h, target_w = argb.shape[:2]
+                if alpha_hint_image.shape[:2] != (target_h, target_w):
                     from PIL import Image as _PILImg
                     alpha_hint_image = np.array(
-                        _PILImg.fromarray(alpha_hint_image, "L").resize((width, height), _PILImg.Resampling.BILINEAR)
+                        _PILImg.fromarray(alpha_hint_image, "L").resize(
+                            (target_w, target_h), _PILImg.Resampling.BILINEAR)
                     )
 
             # Build inference request

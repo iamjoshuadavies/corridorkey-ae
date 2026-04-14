@@ -11,9 +11,11 @@
 
 ---
 
-> **Status:** Active development.
-> - **macOS (Apple Silicon):** keying pipeline working end-to-end via MLX.
-> - **Windows (x64):** plugin builds, loads in AE, and the IPC bridge auto-launches the runtime. Inference engine still to come (see Remaining Work).
+> **Status:** Active development. Keying pipeline working end-to-end on both
+> platforms.
+> - **macOS (Apple Silicon):** MLX inference, ~4.6s/frame at 1080p (tiled).
+> - **Windows (x64):** PyTorch CUDA inference, ~400ms at 2048×2048 fp16 on
+>   an RTX 4090. Uses the checkpoint from a local EZ-CorridorKey install.
 
 ## What It Does
 
@@ -45,8 +47,8 @@ CorridorKey AE brings physically accurate green-screen separation directly into 
            │ TCP socket on 127.0.0.1 (length-prefixed binary)
            │ Port handed off via temp-file
 ┌──────────▼───────────────┐
-│   Python Runtime         │  Tiled inference + postprocessing
-│   MLX (Mac) / WIP (Win)  │  Auto-launched as a subprocess on first frame
+│   Python Runtime         │  Inference + postprocessing
+│   MLX (Mac) / Torch (Win)│  Auto-launched as a subprocess on first frame
 └──────────────────────────┘
 ```
 
@@ -103,11 +105,17 @@ cmake -B build_win -S . -G "Visual Studio 16 2019" -A x64 `
       -DAE_SDK_PATH="C:\path\to\AfterEffectsSDK\Examples"
 cmake --build build_win --config Release
 
-# Runtime — minimal deps (no MLX on Windows yet)
+# Runtime — install minimal IPC deps + PyTorch CUDA + the model code's deps
 cd runtime
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-pip install msgpack numpy Pillow opencv-python-headless
+pip install msgpack numpy Pillow opencv-python-headless timm safetensors
+pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 --index-url https://download.pytorch.org/whl/cu121
+
+# The PyTorch engine loads its model code + .pth weights from a local
+# EZ-CorridorKey install (we never ship that — it's their proprietary code).
+# Install EZ-CorridorKey to ~/Desktop/EZ-CorridorKey, OR set:
+[Environment]::SetEnvironmentVariable('EZ_CORRIDORKEY_PATH', 'C:\path\to\EZ-CorridorKey', 'User')
 
 # Install the .aex into AE's plug-ins folder (admin shell required —
 # Program Files is protected). Close AE first; the file is locked while open.
@@ -163,9 +171,14 @@ corridorkey-ae/
 
 See [open issues](https://github.com/iamjoshuadavies/corridorkey-ae/issues) for the full backlog. Key items:
 
-- [ ] **Windows inference engine** — PyTorch/CUDA backend (the EZ-CorridorKey
-      Windows app ships a `.pth` we can target). Plugin + runtime IPC already
-      work on Windows; only the engine is missing.
+- [ ] **Windows quality presets** — the Quality dropdown is currently a
+      no-op for the PyTorch engine (always 2048×2048). Hook it up to skip
+      the refiner / use lower padding for faster previews.
+- [ ] **Windows: ship our own model code + weights** — currently we load
+      `model_transformer.py` and `CorridorKey_v1.0.pth` from a local
+      EZ-CorridorKey install. A self-contained build needs upstream
+      CorridorKey (CC BY-NC-SA) integration so Windows users don't need
+      EZ-CorridorKey on disk.
 - [ ] **Parallel MFR inference** (#12) — connection pool for multi-threaded rendering
 - [ ] **Float32 pipeline** (#10) — skip uint8 quantization for 32bpc projects
 - [ ] **Async render** (#6) — non-blocking inference for smoother UI
