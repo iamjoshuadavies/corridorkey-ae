@@ -12,10 +12,16 @@
 ---
 
 > **Status:** Active development. Keying pipeline working end-to-end on both
-> platforms.
+> platforms, both bootstrapping from zero (no EZ-CorridorKey required).
 > - **macOS (Apple Silicon):** MLX inference, ~4.6s/frame at 1080p (tiled).
-> - **Windows (x64):** PyTorch CUDA inference, ~400ms at 2048×2048 fp16 on
->   an RTX 4090. Uses the checkpoint from a local EZ-CorridorKey install.
+> - **Windows (x64):** PyTorch CUDA inference. Quality dropdown switches
+>   between 512/1024/2048 model sizes; ~165 ms at Fastest, ~558 ms at Full
+>   Res on an RTX 4090.
+>
+> Both platforms download the model weights on first run from the
+> [corridorkey-mlx](https://github.com/nikopueringer/corridorkey-mlx)
+> GitHub release. Windows applies a reverse MLX→PyTorch conversion to the
+> downloaded safetensors and loads them into a vendored GreenFormer.
 
 ## What It Does
 
@@ -112,10 +118,10 @@ py -3.12 -m venv .venv
 pip install msgpack numpy Pillow opencv-python-headless timm safetensors
 pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 --index-url https://download.pytorch.org/whl/cu121
 
-# The PyTorch engine loads its model code + .pth weights from a local
-# EZ-CorridorKey install (we never ship that — it's their proprietary code).
-# Install EZ-CorridorKey to ~/Desktop/EZ-CorridorKey, OR set:
-[Environment]::SetEnvironmentVariable('EZ_CORRIDORKEY_PATH', 'C:\path\to\EZ-CorridorKey', 'User')
+# That's it — the runtime auto-downloads the model weights (~398 MB) from
+# the corridorkey-mlx GitHub release on first frame and caches them under
+# %LOCALAPPDATA%\CorridorKey\models\. If you have EZ-CorridorKey installed
+# at ~/Desktop/EZ-CorridorKey it will be picked up as a fallback.
 
 # Install the .aex into AE's plug-ins folder (admin shell required —
 # Program Files is protected). Close AE first; the file is locked while open.
@@ -171,14 +177,11 @@ corridorkey-ae/
 
 See [open issues](https://github.com/iamjoshuadavies/corridorkey-ae/issues) for the full backlog. Key items:
 
-- [ ] **Windows quality presets** — the Quality dropdown is currently a
-      no-op for the PyTorch engine (always 2048×2048). Hook it up to skip
-      the refiner / use lower padding for faster previews.
-- [ ] **Windows: ship our own model code + weights** — currently we load
-      `model_transformer.py` and `CorridorKey_v1.0.pth` from a local
-      EZ-CorridorKey install. A self-contained build needs upstream
-      CorridorKey (CC BY-NC-SA) integration so Windows users don't need
-      EZ-CorridorKey on disk.
+- [ ] **Unify the macOS + Windows weight downloaders** — both platforms
+      currently fetch the same `corridorkey_mlx.safetensors` from the same
+      GitHub release, but via different code paths (Mac uses the upstream
+      pip package's helper, Windows uses our urllib downloader). One
+      shared code path would be simpler.
 - [ ] **Parallel MFR inference** (#12) — connection pool for multi-threaded rendering
 - [ ] **Float32 pipeline** (#10) — skip uint8 quantization for 32bpc projects
 - [ ] **Async render** (#6) — non-blocking inference for smoother UI

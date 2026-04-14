@@ -87,14 +87,22 @@ launcher chain swallows stdout before it reaches the parent's pipe).
   `~/Library/Application Support/EZ-CorridorKey/CorridorKeyModule/checkpoints/corridorkey_mlx.safetensors`.
   img_size=2048 is NOT viable on M1 (~450s/frame).
 - Windows: **PyTorch engine** (`runtime/engines/pytorch_engine.py`).
-  Loads `GreenFormer` from EZ-CorridorKey's
-  `_internal/CorridorKeyModule/core/model_transformer.py` via
-  `importlib.util` at runtime — never copied or redistributed. Loads
-  `CorridorKey_v1.0.pth` from
-  `~/Desktop/EZ-CorridorKey/CorridorKeyModule/checkpoints/`. Always pads
-  to 2048×2048 (the only size the checkpoint's pos_embed accepts) — no
-  tiling. ~400ms per frame on RTX 4090 fp16 (~3.2GB peak VRAM).
-  Discovery via `EZ_CORRIDORKEY_PATH` env var or the Desktop default.
+  Self-contained — uses a vendored `GreenFormer` (`_greenformer.py`,
+  cleanly reimplemented from upstream `corridorkey-mlx`'s reference
+  dump script) and weights loader (`_weights_loader.py`) that auto-
+  downloads the official MLX safetensors from the corridorkey-mlx
+  GitHub release on first run, applies the inverse of upstream's
+  PyTorch→MLX converter (transpose conv kernels NCHW↔NHWC + rename
+  refiner stem keys), and loads them strict into the vendored model.
+  Cache lives at `%LOCALAPPDATA%\CorridorKey\models\`.
+  Discovery order: `CORRIDORKEY_PT_WEIGHTS` env → cache → local
+  EZ-CorridorKey install → fresh download.
+  Multi-resolution model cache wired to the Quality dropdown:
+  Fastest=512 (no refiner), Fast=512, High=1024, Full Res=2048. Per
+  resolution the GreenFormer is built lazily and pos_embed is bicubic-
+  interpolated from the checkpoint's native size. All three sizes
+  combined use ~0.5 GB VRAM. Steady-state on RTX 4090 fp16:
+  Fastest ~165 ms, Fast ~173 ms, High ~234 ms, Full Res ~558 ms.
 - Both engines apply ImageNet normalization to RGB inputs (mean
   `[0.485, 0.456, 0.406]`, std `[0.229, 0.224, 0.225]`). Skipping this
   is what produces washed-out / "milky" foreground output — the Hiera

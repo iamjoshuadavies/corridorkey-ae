@@ -404,9 +404,12 @@ class RequestHandler:
                 refiner=refiner,
                 matte_cleanup=matte_cleanup,
             )
-            # Attach the alpha hint and quality mode to the request
+            # Attach the alpha hint and quality mode to the request.
+            # `_use_direct` is a boolean used by MLXEngine; `_quality_mode` is
+            # the raw value used by PyTorchEngine to pick its working img_size.
             request._alpha_hint = alpha_hint_image  # type: ignore[attr-defined]
             request._use_direct = (quality_mode != 3)  # type: ignore[attr-defined]
+            request._quality_mode = quality_mode  # type: ignore[attr-defined]
 
             # Run inference
             t0 = time.perf_counter()

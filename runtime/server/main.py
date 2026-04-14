@@ -61,7 +61,7 @@ def create_engine(model_path: Optional[str] = None, tile_size: int = 512) -> Opt
                 "install EZ-CorridorKey to ~/Desktop/EZ-CorridorKey."
             )
         else:
-            engine = PyTorchEngine(use_refiner=True, prefer_fp16=True)
+            engine = PyTorchEngine(prefer_fp16=True)
             engine.load_model(str(pt_weights))
             logger.info("PyTorch engine ready: %s", engine.device_name)
             return engine
