@@ -15,8 +15,10 @@ concurrency:
 env:
   # Minimal AE SDK subset (headers + utils + AE_General.r + PiPLtool.exe)
   # hosted as a release asset on this repo. See the ci-deps-v1 release
-  # for contents and Adobe attribution.
-  AE_SDK_URL: https://github.com/${{ github.repository }}/releases/download/ci-deps-v1/ae-sdk-minimal.zip
+  # for contents and Adobe attribution. Downloaded via `gh release download`
+  # which handles auth for private repos transparently.
+  AE_SDK_RELEASE_TAG: ci-deps-v1
+  AE_SDK_ASSET_NAME: ae-sdk-minimal.zip
 
 jobs:
   # =============================================================================
@@ -82,13 +84,19 @@ jobs:
       - uses: actions/checkout@v4
 
       # --- Download the minimal AE SDK from our release assets -----------------
+      # `gh release download` uses the GitHub CLI's built-in token handling,
+      # which works transparently for private repos (unlike raw curl/wget
+      # against the browser-facing releases/download URL, which redirects
+      # through auth and breaks).
       - name: Download AE SDK (macOS)
         if: runner.os == 'macOS'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          curl -sSL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-               -H "Accept: application/octet-stream" \
-               -o ae-sdk.zip \
-               "$AE_SDK_URL"
+          gh release download "$AE_SDK_RELEASE_TAG" \
+            --repo "${{ github.repository }}" \
+            --pattern "$AE_SDK_ASSET_NAME" \
+            --output ae-sdk.zip
           mkdir -p ae-sdk
           unzip -q ae-sdk.zip -d ae-sdk
           echo "AE_SDK_PATH=$GITHUB_WORKSPACE/ae-sdk/Examples" >> "$GITHUB_ENV"
@@ -96,12 +104,13 @@ jobs:
       - name: Download AE SDK (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $headers = @{
-            "Authorization" = "token ${{ secrets.GITHUB_TOKEN }}"
-            "Accept" = "application/octet-stream"
-          }
-          Invoke-WebRequest -Uri "$env:AE_SDK_URL" -Headers $headers -OutFile ae-sdk.zip
+          gh release download "$env:AE_SDK_RELEASE_TAG" `
+            --repo "${{ github.repository }}" `
+            --pattern "$env:AE_SDK_ASSET_NAME" `
+            --output ae-sdk.zip
           Expand-Archive -Path ae-sdk.zip -DestinationPath ae-sdk -Force
           "AE_SDK_PATH=$env:GITHUB_WORKSPACE\ae-sdk\Examples" | Out-File -FilePath $env:GITHUB_ENV -Append
 
