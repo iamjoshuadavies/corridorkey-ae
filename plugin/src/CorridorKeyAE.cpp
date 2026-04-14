@@ -128,10 +128,12 @@ A_Err HandleAbout(PF_InData* in_data, PF_OutData* out_data)
 {
 #if AE_SDK_AVAILABLE
     PF_SPRINTF(out_data->return_msg,
-        "%s v%s\n%s\n\nAdvanced green-screen keying for After Effects.",
-        CK_PLUGIN_NAME,
-        CK_VERSION_STRING,
-        CK_PLUGIN_DESCRIPTION
+        "CorridorKey v%s\n\n"
+        "Based on the green-screen keying technique created by\n"
+        "Niko Pueringer of Corridor Digital (youtube.com/CorridorCrew).\n\n"
+        "Physically accurate foreground/background unmixing\n"
+        "powered by MLX on Apple Silicon and PyTorch/CUDA on Windows.",
+        CK_VERSION_STRING
     );
 #endif
     return PF_Err_NONE;

@@ -268,25 +268,25 @@ static PF_Err ClickEvent(
         return PF_Err_NONE;
     }
 
-    // Match the draw layout coordinates
-    float cx = static_cast<float>(event_extra->effect_win.current_frame.left);
-    float cy = static_cast<float>(event_extra->effect_win.current_frame.top);
+    // The entire custom control area is the About hitbox — anywhere in the
+    // branded top bar shows the About dialog. We originally tried to hit-test
+    // just the "About" text rect, but the coordinates drift with font metrics
+    // and control padding, so it ended up nearly impossible to click. Making
+    // the whole bar clickable is the intent anyway — nothing else in there
+    // has its own interaction.
     float mx = static_cast<float>(event_extra->u.do_click.screen_point.h);
     float my = static_cast<float>(event_extra->u.do_click.screen_point.v);
 
-    // "About" link area: text_x = cx + 58, positioned below tagline
-    float text_x = cx + 58.0f;
-    float about_top = cy + 42.0f;   // Approximate y of About text
-    float about_bottom = cy + 58.0f;
-
-    if (mx >= text_x && mx <= text_x + 40.0f &&
-        my >= about_top && my <= about_bottom) {
+    const auto& frame = event_extra->effect_win.current_frame;
+    if (mx >= frame.left && mx <= frame.right &&
+        my >= frame.top  && my <= frame.bottom) {
         PF_SPRINTF(out_data->return_msg,
             "CorridorKey v%s\n\n"
             "Based on the green-screen keying technique created by\n"
             "Niko Pueringer of Corridor Digital (youtube.com/CorridorCrew).\n\n"
             "Physically accurate foreground/background unmixing\n"
-            "powered by MLX on Apple Silicon.",
+            "powered by MLX on Apple Silicon and PyTorch/CUDA on Windows."
+            ,
             CK_VERSION_STRING
         );
         out_data->out_flags |= PF_OutFlag_DISPLAY_ERROR_MESSAGE;
