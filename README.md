@@ -13,7 +13,8 @@
 
 > **Status:** Active development. Keying pipeline working end-to-end on both
 > platforms — both bootstrap from zero on first run with no extra setup.
-> - **macOS (Apple Silicon):** MLX inference, ~4.6s/frame at 1080p (tiled).
+> - **macOS (Apple Silicon):** MLX inference, ~4.8s/frame at 1080p (tiled)
+>   on a MacBook Pro M5.
 > - **Windows (x64):** PyTorch CUDA inference. Quality dropdown switches
 >   between 512/1024/2048 model sizes; ~165 ms at Fastest, ~558 ms at Full
 >   Res on an RTX 4090.
@@ -61,14 +62,17 @@ CorridorKey AE brings physically accurate green-screen separation directly into 
 
 ## Performance
 
-**macOS (M1/M2 via MLX)** — tiled inference, working resolution per preset:
+**macOS (MacBook Pro M5 via MLX)** — tiled inference, working resolution per preset:
 
-| Quality Mode | Resolution | Speed | Use Case |
+| Quality Mode | Resolution | Speed (1080p input) | Use Case |
 |---|---|---|---|
-| Fastest (256) | Downscale to 256 | ~0.1 s | Scrubbing, quick preview |
-| Fast (512) | Downscale to 512 | ~0.3 s | Interactive work |
-| High (1024) | Downscale to 1024 | ~1–2 s | Higher quality preview |
-| Full Res (Tiled) | Native resolution | ~4.6 s at 1080p | Final render, production |
+| Fastest (256) | Downscale to 256 | ~460 ms | Scrubbing, quick preview |
+| Fast (512) | Downscale to 512 | ~460 ms | Interactive work |
+| High (1024) | Downscale to 1024 | ~760 ms | Higher quality preview |
+| Full Res (Tiled) | Native resolution | ~4.8 s | Final render, production |
+
+(Fastest and Fast are effectively the same on M5 — at these sizes the model
+runs at the same effective rate, so there's little benefit to 256 over 512.)
 
 **Windows (RTX 4090 via PyTorch CUDA, fp16)** — each preset switches to a
 different model size (pos_embed bicubic-interpolated at load time):
