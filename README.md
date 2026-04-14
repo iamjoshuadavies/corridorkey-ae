@@ -260,8 +260,9 @@ package on macOS and a vendored PyTorch port on Windows.
 This After Effects port was started by **Josh Davies**
 ([@iamjoshuadavies](https://github.com/iamjoshuadavies)) — wrapping
 Niko's model in a real AE plugin so compositors can use it the way
-they use Keylight. Hopefully more amazing and worthy developers
-will carry it on from here. PRs welcome.
+they use Keylight. Although Claude did a lot of the work here, let's
+be honest. Hopefully more amazing and worthy developers (human or
+otherwise) will carry it on from here. PRs welcome.
 
 This project builds against the **Adobe After Effects SDK**, which is
 © Adobe Inc. The SDK is not included in this source repository — see
