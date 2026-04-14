@@ -9,6 +9,12 @@
   Based on the technique created by <strong>Niko Pueringer</strong> of <a href="https://youtube.com/CorridorCrew">Corridor Digital</a>.
 </p>
 
+<p align="center">
+  <a href="https://github.com/iamjoshuadavies/corridorkey-ae/actions/workflows/ci.yml">
+    <img src="https://github.com/iamjoshuadavies/corridorkey-ae/actions/workflows/ci.yml/badge.svg" alt="CI">
+  </a>
+</p>
+
 ---
 
 > **Status:** Active development. Keying pipeline working end-to-end on both
@@ -206,11 +212,21 @@ corridorkey-ae/
 | **Refiner** | Edge refinement strength (0-1) |
 | **Matte Cleanup** | Tighten and smooth matte edges (0-1) |
 
+## Downloads
+
+Every push to `main` produces macOS and Windows builds as downloadable
+artifacts from the [Actions tab](https://github.com/iamjoshuadavies/corridorkey-ae/actions).
+Open the latest successful CI run and grab `CorridorKey-macOS` or
+`CorridorKey-Windows` from the Artifacts section.
+
+Tagged releases with signed, installable builds are planned for M6 —
+see [open issues](https://github.com/iamjoshuadavies/corridorkey-ae/issues)
+for progress.
+
 ## Remaining Work
 
 See [open issues](https://github.com/iamjoshuadavies/corridorkey-ae/issues) for the full backlog. Key items:
 
-- [ ] **CI** (#26) — GitHub Actions matrix build for macOS + Windows
 - [ ] **Windows codesigning + installer** (#24) — MSI or NSIS, bundle
       the runtime next to the `.aex`, drop the dev env var requirement
 - [ ] **Float32 pipeline** (#10) — skip uint8 quantization for 32bpc projects
@@ -218,6 +234,10 @@ See [open issues](https://github.com/iamjoshuadavies/corridorkey-ae/issues) for 
 ## Credits
 
 Based on the green-screen keying technique created by **Niko Pueringer** of [Corridor Digital](https://youtube.com/CorridorCrew). Model inference via [corridorkey-mlx](https://github.com/nikopueringer/corridorkey-mlx).
+
+This project builds against the **Adobe After Effects SDK**, which is
+© Adobe Inc. The SDK is not included in this source repository — see
+[NOTICE](NOTICE) for third-party attribution details.
 
 ## License
 

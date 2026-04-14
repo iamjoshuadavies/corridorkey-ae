@@ -5,12 +5,28 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:        # Allow manual runs from the Actions tab
+
+# Cancel in-flight runs when a new commit is pushed to the same branch/PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Minimal AE SDK subset (headers + utils + AE_General.r + PiPLtool.exe)
+  # hosted as a release asset on this repo. See the ci-deps-v1 release
+  # for contents and Adobe attribution.
+  AE_SDK_URL: https://github.com/${{ github.repository }}/releases/download/ci-deps-v1/ae-sdk-minimal.zip
 
 jobs:
-  # --- Python runtime tests ---
+  # =============================================================================
+  # Python runtime — lint, type-check, tests on Linux
+  # =============================================================================
   runtime-tests:
+    name: Runtime (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
 
@@ -21,39 +37,125 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: runtime/pyproject.toml
 
       - name: Install dependencies
+        working-directory: runtime
         run: |
-          cd runtime
+          python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Lint
-        run: |
-          cd runtime
-          ruff check server/ engines/ models/ tests/
+      - name: Lint (ruff)
+        working-directory: runtime
+        run: ruff check server/ engines/ models/ tests/
 
-      - name: Type check
-        run: |
-          cd runtime
-          mypy server/ engines/ models/ --ignore-missing-imports || true
+      - name: Type check (mypy)
+        working-directory: runtime
+        run: mypy server/ engines/ models/ --ignore-missing-imports || true
 
-      - name: Test
-        run: |
-          cd runtime
-          pytest tests/ -v --tb=short
+      - name: Test (pytest)
+        working-directory: runtime
+        run: pytest tests/ -v --tb=short
 
-  # --- C++ plugin build (stub mode, no AE SDK) ---
+  # =============================================================================
+  # C++ plugin — real build with minimal SDK, produces shippable artifacts
+  # =============================================================================
   plugin-build:
+    name: Plugin (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
+    needs: runtime-tests
     strategy:
+      fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        include:
+          - os: macos-latest
+            name: macOS
+            artifact: CorridorKey-macOS
+            plugin-path: build/plugin/CorridorKey.plugin
+          - os: windows-2022
+            name: Windows
+            artifact: CorridorKey-Windows
+            plugin-path: build/plugin/Release/CorridorKey.aex
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure CMake
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug
+      # --- Download the minimal AE SDK from our release assets -----------------
+      - name: Download AE SDK (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          curl -sSL -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+               -H "Accept: application/octet-stream" \
+               -o ae-sdk.zip \
+               "$AE_SDK_URL"
+          mkdir -p ae-sdk
+          unzip -q ae-sdk.zip -d ae-sdk
+          echo "AE_SDK_PATH=$GITHUB_WORKSPACE/ae-sdk/Examples" >> "$GITHUB_ENV"
 
+      - name: Download AE SDK (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $headers = @{
+            "Authorization" = "token ${{ secrets.GITHUB_TOKEN }}"
+            "Accept" = "application/octet-stream"
+          }
+          Invoke-WebRequest -Uri "$env:AE_SDK_URL" -Headers $headers -OutFile ae-sdk.zip
+          Expand-Archive -Path ae-sdk.zip -DestinationPath ae-sdk -Force
+          "AE_SDK_PATH=$env:GITHUB_WORKSPACE\ae-sdk\Examples" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # --- Configure CMake -----------------------------------------------------
+      - name: Configure CMake (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DAE_SDK_PATH="$AE_SDK_PATH"
+
+      - name: Configure CMake (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake -B build -S . `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DAE_SDK_PATH="$env:AE_SDK_PATH"
+
+      # --- Build ---------------------------------------------------------------
       - name: Build
-        run: cmake --build build --config Debug
+        run: cmake --build build --config Release
+
+      # --- Sanity check the output --------------------------------------------
+      - name: Verify build output (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          test -d "${{ matrix.plugin-path }}/Contents/MacOS"
+          file "${{ matrix.plugin-path }}/Contents/MacOS/CorridorKey"
+          ls -la "${{ matrix.plugin-path }}/Contents/Resources/"
+          codesign -dvvv "${{ matrix.plugin-path }}" 2>&1 | head -5
+
+      - name: Verify build output (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${{ matrix.plugin-path }}")) {
+            throw "Plugin binary not found at ${{ matrix.plugin-path }}"
+          }
+          Get-Item "${{ matrix.plugin-path }}" | Format-List
+
+      # --- Upload as artifact (available from the Actions tab) -----------------
+      - name: Upload plugin artifact (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.plugin-path }}
+          retention-days: 30
+
+      - name: Upload plugin artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.plugin-path }}
+          retention-days: 30

@@ -1,0 +1,26 @@
+CorridorKey AE
+==============
+
+Third-party components
+----------------------
+
+This project builds against the Adobe After Effects SDK, which is
+copyright Adobe Inc. The SDK itself is NOT included in this source
+repository — it is fetched at build time (either manually by developers
+from https://developer.adobe.com/after-effects/, or by the CI workflow
+from a minimal SDK subset published as a release asset on this repo
+for automated build purposes).
+
+The After Effects SDK is © Adobe Inc. All rights reserved.
+
+The CorridorKey inference model and the `corridorkey_mlx` Python
+package are the work of Niko Pueringer and Corridor Digital, licensed
+under CC BY-NC-SA 4.0 with additional terms. See the upstream at
+https://github.com/nikopueringer/corridorkey-mlx.
+
+Project license
+---------------
+
+CorridorKey AE itself (this source repository, excluding the third-party
+components listed above) is licensed under the PolyForm Noncommercial
+License 1.0.0. See LICENSE for the full terms.
