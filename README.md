@@ -127,15 +127,22 @@ pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 --index-url https://dow
 # Program Files is protected). Close AE first; the file is locked while open.
 Copy-Item -Force .\build_win\plugin\Release\CorridorKey.aex `
   "C:\Program Files\Adobe\Adobe After Effects 2026\Support Files\Plug-ins\Effects\CorridorKey.aex"
+```
 
-# Tell the bridge where the runtime venv lives. Required on Windows because
-# the .aex sits in Program Files with no path-relationship to the source repo.
+The bridge auto-discovers the Python runtime in this order:
+1. `CORRIDORKEY_REPO_ROOT` env var (dev escape hatch — point at a source checkout)
+2. `%LOCALAPPDATA%\CorridorKey\runtime\.venv\Scripts\python.exe` (per-user install)
+3. `%ProgramFiles%\CorridorKey\runtime\.venv\Scripts\python.exe` (system-wide install)
+
+For dev work from a source checkout, set the env var once:
+```powershell
 [Environment]::SetEnvironmentVariable('CORRIDORKEY_REPO_ROOT', 'C:\path\to\corridorkey-ae', 'User')
 ```
 
 Then launch After Effects fresh (env vars are inherited at process start).
 The plugin appears under **Effect → Keying → CorridorKey**, auto-launches
-the runtime on first render, and renders the "no model" fallback overlay.
+the runtime on first render, and downloads the model weights on first
+frame (~398 MB, one-time).
 
 ### Tests
 

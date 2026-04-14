@@ -42,8 +42,11 @@ cmake --build build_win --config Release
 Copy-Item -Force "build_win/plugin/Release/CorridorKey.aex" \
   "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files/Plug-ins/Effects/CorridorKey.aex"
 
-# Set the env var that lets the bridge find the runtime venv (because the
-# .aex sits in Program Files with no relationship to the source repo).
+# Bridge discovers the runtime venv via:
+#   1. CORRIDORKEY_REPO_ROOT env var      (dev escape hatch)
+#   2. %LOCALAPPDATA%\CorridorKey         (per-user install)
+#   3. %ProgramFiles%\CorridorKey         (system-wide install)
+# For a source-tree dev workflow set the env var once:
 [Environment]::SetEnvironmentVariable('CORRIDORKEY_REPO_ROOT', 'C:\Users\iamjo\Documents\corridorkey-ae', 'User')
 
 # Runtime venv (no MLX on Windows yet — minimal deps for fallback overlay)

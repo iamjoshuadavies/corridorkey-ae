@@ -18,6 +18,7 @@
 #include <array>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #ifdef _WIN32
     #ifndef NOMINMAX
@@ -287,25 +288,87 @@ struct RuntimeBridge::Impl {
         connect_failures = 0;
     }
 
+    // Path under a repo root that must exist for a candidate to be valid.
+    // Used by FindRepoRoot() as the file-exists probe.
+#ifdef _WIN32
+    static constexpr const char* kRuntimePythonSubpath = "/runtime/.venv/Scripts/python.exe";
+#else
+    static constexpr const char* kRuntimePythonSubpath = "/runtime/.venv/bin/python3";
+#endif
+
+    static bool CandidateHasRuntime(const std::string& root) {
+        if (root.empty()) return false;
+        std::string probe = root + kRuntimePythonSubpath;
+#ifdef _WIN32
+        DWORD attr = GetFileAttributesA(probe.c_str());
+        return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
+#else
+        return access(probe.c_str(), X_OK) == 0;
+#endif
+    }
+
     std::string FindRepoRoot() {
         if (repo_root_resolved) return repo_root;
         repo_root_resolved = true;
 
-        // 1. Explicit override via env var (primary mechanism on Windows where
-        //    the .aex is installed in Program Files with no path-relationship
-        //    to the source repo).
+        std::vector<std::string> candidates;
+
+        // 1. Dev escape hatch: CORRIDORKEY_REPO_ROOT env var. Still supported
+        //    so running from a source checkout Just Works — but no longer
+        //    required for packaged installs.
         if (const char* env = std::getenv("CORRIDORKEY_REPO_ROOT")) {
-            if (env[0] != '\0') {
-                repo_root = env;
+            if (env[0] != '\0') candidates.emplace_back(env);
+        }
+
+        // 2. Well-known install locations.
+#ifdef _WIN32
+        //    Per-user install: %LOCALAPPDATA%\CorridorKey
+        if (const char* lad = std::getenv("LOCALAPPDATA")) {
+            if (lad[0] != '\0') {
+                candidates.emplace_back(std::string(lad) + "\\CorridorKey");
+            }
+        }
+        //    System-wide install: %ProgramFiles%\CorridorKey
+        if (const char* pf = std::getenv("ProgramFiles")) {
+            if (pf[0] != '\0') {
+                candidates.emplace_back(std::string(pf) + "\\CorridorKey");
+            }
+        }
+#else
+        //    Per-user install: ~/Library/Application Support/CorridorKey  (macOS)
+        //                      ~/.local/share/CorridorKey                 (Linux)
+        if (const char* home = std::getenv("HOME")) {
+            if (home[0] != '\0') {
+#  ifdef __MACH__
+                candidates.emplace_back(
+                    std::string(home) + "/Library/Application Support/CorridorKey");
+#  else
+                candidates.emplace_back(std::string(home) + "/.local/share/CorridorKey");
+#  endif
+            }
+        }
+#endif
+
+        // 3. Plugin-bundle-relative fallback. On macOS dev workflow this
+        //    resolves the AE symlink back into the build tree and finds the
+        //    repo root. On Windows this is usually useless (the .aex lives
+        //    in Program Files with no path-relationship to the runtime) but
+        //    cheap to check.
+        std::string bundle = GetPluginBundlePath();
+        if (!bundle.empty()) candidates.emplace_back(bundle);
+
+        // Return the first candidate where the runtime's Python is actually
+        // present — that way we skip bogus paths silently instead of
+        // trying to CreateProcess a missing file.
+        for (const std::string& c : candidates) {
+            if (CandidateHasRuntime(c)) {
+                repo_root = c;
                 return repo_root;
             }
         }
 
-        // 2. Derive from the plugin binary location. On macOS this resolves
-        //    the AE symlink back into the build tree. On Windows this gives
-        //    the .aex's parent directory — only useful if the user copied
-        //    the .aex back into the build tree manually.
-        repo_root = GetPluginBundlePath();
+        // Nothing validated. Return empty so LaunchRuntime bails out cleanly.
+        repo_root.clear();
         return repo_root;
     }
 

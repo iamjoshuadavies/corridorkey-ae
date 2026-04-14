@@ -14,14 +14,13 @@ import threading
 from pathlib import Path
 
 from engines.base import InferenceEngine
-
 from server.hardware import detect_hardware
 from server.ipc import IPCServer
 
 logger = logging.getLogger("corridorkey.runtime")
 
 
-def create_engine(model_path: str | None = None, tile_size: int = 512) -> InferenceEngine | None:
+def create_engine(model_path: str | None = None) -> InferenceEngine | None:
     """Create and load the best available inference engine.
 
     Order of preference:
@@ -36,13 +35,13 @@ def create_engine(model_path: str | None = None, tile_size: int = 512) -> Infere
         if model_path is None:
             weights = find_model_weights()
             if weights is not None:
-                engine = MLXEngine(tile_size=tile_size, use_refiner=True)
+                engine = MLXEngine(use_refiner=True)
                 engine.load_model(str(weights))
                 logger.info("MLX engine ready: %s", engine.device_name)
                 return engine
             logger.info("No MLX model weights found — falling through to PyTorch")
         else:
-            engine = MLXEngine(tile_size=tile_size, use_refiner=True)
+            engine = MLXEngine(use_refiner=True)
             engine.load_model(model_path)
             logger.info("MLX engine ready: %s", engine.device_name)
             return engine
@@ -78,10 +77,6 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=0, help="TCP port (0 = auto-assign)")
     parser.add_argument("--socket", type=str, default=None, help="Unix domain socket path")
     parser.add_argument("--model", type=str, default=None, help="Path to model weights")
-    parser.add_argument(
-        "--tile-size", type=int, default=512,
-        help="Tile size for tiled inference (512=default, larger=more VRAM)",
-    )
     parser.add_argument(
         "--log-level", default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -124,7 +119,7 @@ def main() -> None:
     def _load_engine_bg() -> None:
         try:
             handler.set_engine_state("loading", "Loading engine")
-            eng = create_engine(model_path=args.model, tile_size=args.tile_size)
+            eng = create_engine(model_path=args.model)
             _engine_slot["engine"] = eng
             if eng is not None:
                 handler.attach_engine(eng)

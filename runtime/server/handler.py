@@ -18,9 +18,9 @@ from collections import OrderedDict
 from typing import Any
 
 import numpy as np
-from engines.base import InferenceEngine, InferenceRequest
 from PIL import Image, ImageDraw, ImageFont
 
+from engines.base import InferenceEngine, InferenceRequest
 from server.hardware import detect_hardware
 
 logger = logging.getLogger("corridorkey.handler")

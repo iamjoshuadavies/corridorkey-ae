@@ -13,6 +13,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+
 from engines import _weights_loader as wl
 
 # ---------------------------------------------------------------------------
