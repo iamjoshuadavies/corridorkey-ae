@@ -1,0 +1,11 @@
+// CorridorKeyAE.rc
+//
+// Windows resource file for the After Effects plugin.
+//
+// The actual PiPL resource data is generated at build time by the
+// PiPLtool pipeline defined in plugin/CMakeLists.txt. That pipeline
+// produces CorridorKeyAEPiPL_temp.rc in the build directory, which
+// this file includes. (The build directory is added to the rc.exe
+// include path so the #include resolves.)
+
+#include "CorridorKeyAEPiPL_temp.rc"

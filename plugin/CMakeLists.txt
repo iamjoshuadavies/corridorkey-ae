@@ -5,9 +5,21 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --- Adobe After Effects SDK ---
-# Set AE_SDK_PATH to your local SDK location, or place it in ae_sdk/ at repo root
+# Set AE_SDK_PATH to your local SDK location, or place it in ae_sdk/ at repo root.
+# On Windows, the SDK usually extracts to ae_sdk_win/<zip-root>/<zstd-root>/Examples —
+# check that nested path as a convenience fallback.
 if(NOT DEFINED AE_SDK_PATH)
-    set(AE_SDK_PATH "${CMAKE_SOURCE_DIR}/../ae_sdk" CACHE PATH "Path to Adobe After Effects SDK")
+    set(_default_sdk "${CMAKE_SOURCE_DIR}/../ae_sdk")
+    if(WIN32 AND NOT EXISTS "${_default_sdk}")
+        file(GLOB _win_sdk_candidates
+            "${CMAKE_SOURCE_DIR}/../ae_sdk_win/*/*/Examples"
+            "${CMAKE_SOURCE_DIR}/../ae_sdk_win/*/Examples"
+        )
+        if(_win_sdk_candidates)
+            list(GET _win_sdk_candidates 0 _default_sdk)
+        endif()
+    endif()
+    set(AE_SDK_PATH "${_default_sdk}" CACHE PATH "Path to Adobe After Effects SDK")
 endif()
 
 if(NOT EXISTS "${AE_SDK_PATH}")
@@ -64,14 +76,14 @@ if(APPLE)
     )
 elseif(WIN32)
     # Windows: Build as a .aex (renamed DLL)
-    add_library(CorridorKeyAE SHARED ${PLUGIN_SOURCES} ${PLUGIN_HEADERS})
+    add_library(CorridorKeyAE SHARED ${PLUGIN_SOURCES} ${PLUGIN_HEADERS} ${SDK_UTIL_SOURCES})
 
     set_target_properties(CorridorKeyAE PROPERTIES
         SUFFIX ".aex"
         OUTPUT_NAME "CorridorKey"
     )
 
-    # Windows-specific resource file for PiPL
+    # Windows-specific resource file for PiPL (wraps the generated _temp.rc)
     target_sources(CorridorKeyAE PRIVATE resources/CorridorKeyAE.rc)
 endif()
 
@@ -164,6 +176,56 @@ if(APPLE AND AE_SDK_FOUND)
     else()
         message(WARNING "Rez not found — PiPL resource will not be compiled. Plugin will not load in AE.")
     endif()
+endif()
+
+# --- PiPL Resource (Windows) ---
+# Replicates the SDK sample pipeline:
+#   1. cl /EP /I <Headers>  CorridorKeyAEPiPL.r              > CorridorKeyAEPiPL.rr
+#   2. PiPLtool.exe         CorridorKeyAEPiPL.rr               CorridorKeyAEPiPL.rrc
+#   3. cl /D MSWindows /EP  CorridorKeyAEPiPL.rrc            > CorridorKeyAEPiPL_temp.rc
+#
+# CorridorKeyAE.rc (tracked) #includes CorridorKeyAEPiPL_temp.rc, and we add the
+# build directory to the rc.exe include path so the #include resolves.
+if(WIN32 AND AE_SDK_FOUND)
+    set(PIPL_R        "${CMAKE_CURRENT_SOURCE_DIR}/resources/CorridorKeyAEPiPL.r")
+    set(PIPL_RR       "${CMAKE_CURRENT_BINARY_DIR}/CorridorKeyAEPiPL.rr")
+    set(PIPL_RRC      "${CMAKE_CURRENT_BINARY_DIR}/CorridorKeyAEPiPL.rrc")
+    set(PIPL_TEMP_RC  "${CMAKE_CURRENT_BINARY_DIR}/CorridorKeyAEPiPL_temp.rc")
+
+    # PiPLtool.exe lives in Examples/Resources/
+    set(PIPL_TOOL     "${AE_SDK_PATH}/Resources/PiPLtool.exe")
+
+    if(NOT EXISTS "${PIPL_TOOL}")
+        message(WARNING "PiPLtool.exe not found at: ${PIPL_TOOL}")
+    endif()
+
+    # Find cl.exe explicitly — needed because PiPL pipeline uses it as a preprocessor
+    # outside the normal compile, and at custom-command time ${CMAKE_CXX_COMPILER}
+    # may not be in PATH without the VS dev environment.
+    set(CL_EXE "${CMAKE_CXX_COMPILER}")
+
+    add_custom_command(
+        OUTPUT "${PIPL_TEMP_RC}"
+        # Step 1: preprocess .r with cl to produce .rr
+        COMMAND "${CL_EXE}" /nologo /I "${AE_SDK_PATH}/Headers" /EP "${PIPL_R}" > "${PIPL_RR}"
+        # Step 2: PiPLtool converts .rr to .rrc
+        COMMAND "${PIPL_TOOL}" "${PIPL_RR}" "${PIPL_RRC}"
+        # Step 3: preprocess .rrc with cl /D MSWindows to produce the final _temp.rc
+        COMMAND "${CL_EXE}" /nologo /D "MSWindows" /EP "${PIPL_RRC}" > "${PIPL_TEMP_RC}"
+        DEPENDS "${PIPL_R}"
+        COMMENT "Generating PiPL resource (cl /EP -> PiPLtool -> cl /EP)"
+        VERBATIM
+    )
+
+    add_custom_target(CorridorKeyPiPL_Win DEPENDS "${PIPL_TEMP_RC}")
+    add_dependencies(CorridorKeyAE CorridorKeyPiPL_Win)
+
+    # The tracked CorridorKeyAE.rc does `#include "CorridorKeyAEPiPL_temp.rc"`,
+    # so rc.exe needs to find it in the build directory.
+    target_include_directories(CorridorKeyAE PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    # Newer CMake also honors this for resource compilation:
+    set_property(SOURCE resources/CorridorKeyAE.rc APPEND PROPERTY
+        OBJECT_DEPENDS "${PIPL_TEMP_RC}")
 endif()
 
 # --- Install ---

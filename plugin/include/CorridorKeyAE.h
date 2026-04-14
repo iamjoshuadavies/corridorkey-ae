@@ -62,7 +62,7 @@ extern "C" {
      * Effect entry point — called per-command by After Effects.
      * Routes commands (about, setup, render, etc.) to handlers.
      */
-    PF_Err EffectMain(
+    DllExport PF_Err EffectMain(
         PF_Cmd          cmd,
         PF_InData       *in_data,
         PF_OutData      *out_data,

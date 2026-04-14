@@ -43,7 +43,7 @@ PF_Err PluginDataEntryFunction2(
 // Effect Entry Point — called per-command by AE
 // =============================================================================
 
-PF_Err
+extern "C" DllExport PF_Err
 EffectMain(
     PF_Cmd          cmd,
     PF_InData       *in_data,

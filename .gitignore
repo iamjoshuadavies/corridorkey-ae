@@ -67,6 +67,7 @@ models/weights/
 # --- Adobe After Effects SDK ---
 # The SDK itself should not be committed
 ae_sdk/
+ae_sdk_win/
 Adobe_After_Effects_SDK/
 
 # --- Package / Release ---

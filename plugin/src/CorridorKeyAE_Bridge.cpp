@@ -17,14 +17,28 @@
 #include <chrono>
 #include <array>
 #include <mutex>
+#include <thread>
 
 #ifdef _WIN32
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
+    #ifndef WIN32_LEAN_AND_MEAN
+        #define WIN32_LEAN_AND_MEAN
+    #endif
     #include <winsock2.h>
     #include <ws2tcpip.h>
+    #include <windows.h>
     #pragma comment(lib, "ws2_32.lib")
     typedef SOCKET socket_t;
+    typedef int pid_t;                  // Windows: bridge only uses pid_t as a sentinel
     #define INVALID_SOCK INVALID_SOCKET
     #define CLOSE_SOCKET closesocket
+    #define SETSOCKOPT_CAST(p) reinterpret_cast<const char*>(p)
+    // usleep shim: microseconds -> std::this_thread sleep
+    static inline void usleep(unsigned int usec) {
+        std::this_thread::sleep_for(std::chrono::microseconds(usec));
+    }
 #else
     #include <unistd.h>
     #include <sys/socket.h>
@@ -40,6 +54,7 @@
     typedef int socket_t;
     #define INVALID_SOCK (-1)
     #define CLOSE_SOCKET close
+    #define SETSOCKOPT_CAST(p) (p)
 #endif
 
 namespace corridorkey {
@@ -320,8 +335,8 @@ struct RuntimeBridge::Impl {
         struct timeval connect_tv;
         connect_tv.tv_sec = 0;
         connect_tv.tv_usec = 500000; // 500ms
-        setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &connect_tv, sizeof(connect_tv));
-        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &connect_tv, sizeof(connect_tv));
+        setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, SETSOCKOPT_CAST(&connect_tv), sizeof(connect_tv));
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, SETSOCKOPT_CAST(&connect_tv), sizeof(connect_tv));
 
         struct sockaddr_in addr{};
         addr.sin_family = AF_INET;
@@ -337,8 +352,8 @@ struct RuntimeBridge::Impl {
         struct timeval io_tv;
         io_tv.tv_sec = 30;
         io_tv.tv_usec = 0;
-        setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &io_tv, sizeof(io_tv));
-        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &io_tv, sizeof(io_tv));
+        setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, SETSOCKOPT_CAST(&io_tv), sizeof(io_tv));
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, SETSOCKOPT_CAST(&io_tv), sizeof(io_tv));
 
         sock = s;
         connected = true;
@@ -353,6 +368,17 @@ struct RuntimeBridge::Impl {
 RuntimeBridge::RuntimeBridge()
     : m_impl(std::make_unique<Impl>())
 {
+#ifdef _WIN32
+    // Initialize WinSock once per bridge. Safe to call repeatedly; each
+    // WSAStartup pairs with a WSACleanup in ~Impl via a static guard.
+    static std::once_flag wsa_init_flag;
+    std::call_once(wsa_init_flag, []() {
+        WSADATA wsa_data;
+        WSAStartup(MAKEWORD(2, 2), &wsa_data);
+        // No matching WSACleanup: plugin lifetime == process lifetime in AE,
+        // and calling cleanup on unload would race with other sockets.
+    });
+#endif
 }
 
 RuntimeBridge::~RuntimeBridge()
@@ -547,10 +573,12 @@ void RuntimeBridge::Shutdown()
     }
     m_impl->CloseSocket();
 
+#ifndef _WIN32
     if (m_impl->stdout_pipe >= 0) {
         close(m_impl->stdout_pipe);
         m_impl->stdout_pipe = -1;
     }
+#endif
 
     if (m_impl->child_pid > 0) {
 #ifndef _WIN32

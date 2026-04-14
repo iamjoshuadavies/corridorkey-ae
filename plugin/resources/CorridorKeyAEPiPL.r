@@ -35,13 +35,13 @@ resource 'PiPL' (16000) {
 			PF_PLUG_IN_SUBVERS
 		},
 		AE_Effect_Version {
-			65536		/* 1.0 */
+			32768		/* 0x8000 = PF_VERSION(0, 1, 0, DEVELOP, 0) — must match HandleGlobalSetup in CorridorKeyAE.cpp */
 		},
 		AE_Effect_Info_Flags {
 			0
 		},
 		AE_Effect_Global_OutFlags {
-			0x04008040	/* PF_OutFlag_DEEP_COLOR_AWARE | PF_OutFlag_CUSTOM_UI | PF_OutFlag_PIX_INDEPENDENT */
+			0x02008400	/* PF_OutFlag_PIX_INDEPENDENT (1<<10) | PF_OutFlag_CUSTOM_UI (1<<15) | PF_OutFlag_DEEP_COLOR_AWARE (1<<25) */
 		},
 		AE_Effect_Global_OutFlags_2 {
 			0x08001400	/* SUPPORTS_SMART_RENDER (1<<10) | FLOAT_COLOR_AWARE (1<<12) | SUPPORTS_THREADED_RENDERING (1<<27) */
