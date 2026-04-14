@@ -432,7 +432,6 @@ struct RuntimeBridge::Impl {
             // argv[0] must be the full path so Python detects its venv
             execl(python.c_str(), python.c_str(), "-m", "server.main",
                   "--port", "0", // Auto-assign port
-                  "--tile-size", "512",
                   nullptr);
 
             // If exec failed
@@ -502,7 +501,7 @@ struct RuntimeBridge::Impl {
 
         // Build the command line. Quote the python path; argv0 must be the
         // venv python (not a copy elsewhere) so Python detects its venv.
-        std::string cmdline = "\"" + python + "\" -m server.main --port 0 --tile-size 512";
+        std::string cmdline = "\"" + python + "\" -m server.main --port 0";
         // CreateProcessW needs a writable wide buffer
         std::wstring wcmd;
         {
