@@ -210,16 +210,25 @@ corridorkey-ae/
 
 See [open issues](https://github.com/iamjoshuadavies/corridorkey-ae/issues) for the full backlog. Key items:
 
-- [ ] **Async render** (#6) — non-blocking inference so AE stays
-      responsive during normal playback / scrubbing (first-run UX is
-      already handled — the engine loads in a background thread and
-      the render path shows a loading status instead of freezing).
-- [ ] **Parallel MFR inference** (#12) — connection pool for multi-threaded rendering
-- [ ] **Float32 pipeline** (#10) — skip uint8 quantization for 32bpc projects
-- [ ] **macOS regression retest** (#23) — after the Windows port refactor
+- [ ] **CI** (#26) — GitHub Actions matrix build for macOS + Windows
 - [ ] **Windows codesigning + installer** (#24) — MSI or NSIS, bundle
       the runtime next to the `.aex`, drop the dev env var requirement
-- [ ] **CI** (#26) — GitHub Actions matrix build for macOS + Windows
+- [ ] **Float32 pipeline** (#10) — skip uint8 quantization for 32bpc projects
+
+### Investigated and closed as not-worth-doing
+
+- **Async / non-blocking render** (#6) — architecturally blocked by AE's
+  synchronous render model. The SDK has no "I'll get back to you"
+  callback and no sanctioned way to invalidate a single frame from a
+  background thread. Returning a placeholder poisons AE's cache.
+  Background engine loading and the two-tier frame cache already
+  handle the interactive cases that matter.
+- **Parallel MFR inference** (#12) — the GPU itself serializes, so
+  multiple MFR threads running inference concurrently would gain
+  ~15–25% steady-state throughput from CPU/GPU overlap at best (not
+  2x), in exchange for a connection pool + thread-safe runtime
+  handler + engine-level locking. Not worth it at current per-frame
+  speeds (190–610 ms on RTX 4090).
 
 ## Credits
 

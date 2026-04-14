@@ -148,6 +148,30 @@ launcher chain swallows stdout before it reaches the parent's pipe).
   quality size (PyTorch)
 - Debug image saves gated behind CK_DEBUG=1 env var
 
+## Architectural non-goals
+
+Two things we explicitly will NOT build, documented so we don't
+re-litigate them every few weeks:
+
+- **True async / non-blocking render (#6, closed).** AE's effect render
+  model is synchronous — `PF_Cmd_SMART_RENDER` must return pixels in
+  that call, there is no "I'll get back to you" callback, and there's
+  no public API for an effect to invalidate its own cached frame from
+  a background thread. Returning a placeholder poisons AE's
+  `(time, params)` cache until the user wiggles a parameter. What we
+  DO have (Smart Render + MFR + background engine loading + two-tier
+  frame cache) handles the interactive cases that matter. Use the
+  AEGP API only if we end up needing a companion general plug-in for
+  other reasons.
+- **Parallel MFR inference (#12, closed).** The GPU serializes at the
+  driver level — two concurrent MLX/CUDA forward passes on the same
+  model don't actually overlap, they queue. A connection pool in the
+  bridge would give us ~15–25% steady-state throughput by overlapping
+  CPU pre/post work with GPU inference, but the implementation cost
+  (thread-safe runtime handler, engine-level locking, pool bookkeeping)
+  is not worth it at current per-frame speeds. Re-open only if a batch
+  export workflow becomes a real complaint.
+
 ## Quality gates
 - Python runtime: `ruff check` clean, `mypy --config-file pyproject.toml`
   (strict + warn_return_any) clean, 23/23 tests passing under
