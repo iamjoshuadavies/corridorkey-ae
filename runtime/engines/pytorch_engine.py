@@ -244,16 +244,26 @@ class PyTorchEngine(InferenceEngine):
             return InferenceResult(image=request.image, success=False, error="Model not loaded")
 
         try:
+            import time as _time
             import torch
+
+            _t_total = _time.perf_counter()
+            _steps: list[tuple[str, float]] = []
+            def _tick(label: str, start: float) -> float:
+                now = _time.perf_counter()
+                _steps.append((label, (now - start) * 1000))
+                return now
 
             argb = request.image
             h, w = argb.shape[:2]
 
+            _t = _time.perf_counter()
             # ARGB -> RGB
             rgb = np.zeros((h, w, 3), dtype=np.uint8)
             rgb[:, :, 0] = argb[:, :, 1]
             rgb[:, :, 1] = argb[:, :, 2]
             rgb[:, :, 2] = argb[:, :, 3]
+            _t = _tick("argb->rgb", _t)
 
             alpha_hint = getattr(request, "_alpha_hint", None)
             if alpha_hint is None:
@@ -275,6 +285,7 @@ class PyTorchEngine(InferenceEngine):
             # (which is where keying actually matters).
             pix_md5  = hashlib.md5(rgb.tobytes()).hexdigest()
             hint_md5 = hashlib.md5(alpha_hint.tobytes()).hexdigest()
+            _t = _tick("hash", _t)
             raw_key = (
                 f"{pix_md5}:{hint_md5}:{request.refiner:.3f}:{h}:{w}:{quality_mode}"
             )
@@ -282,10 +293,13 @@ class PyTorchEngine(InferenceEngine):
             if raw_key == self._raw_cache_key and self._raw_cache_alpha is not None:
                 alpha = self._raw_cache_alpha.copy()
                 fg = self._raw_cache_fg.copy()
+                _t = _tick("cache_hit", _t)
                 logger.info("Raw model cache HIT — skipping inference")
             else:
                 model = self._get_model(model_img_size)
+                _t = _tick("get_model", _t)
                 x, crop_box, orig_size = self._prepare_input(rgb, alpha_hint, model_img_size)
+                _t = _tick("prepare_input", _t)
 
                 with torch.no_grad():
                     refiner_scale = (
@@ -293,16 +307,16 @@ class PyTorchEngine(InferenceEngine):
                         if not skip_refiner else None
                     )
                     output = model(x, refiner_scale=refiner_scale, skip_refiner=skip_refiner)
+                    if torch.cuda.is_available():
+                        torch.cuda.synchronize()
+                _t = _tick("model_forward", _t)
 
                 alpha, fg = self._crop_and_unpad(output, crop_box, orig_size)
+                _t = _tick("crop_unpad", _t)
 
                 self._raw_cache_key = raw_key
                 self._raw_cache_alpha = alpha.copy()
                 self._raw_cache_fg = fg.copy()
-                logger.info(
-                    "Inference complete (img_size=%d skip_refiner=%s) — cached",
-                    model_img_size, skip_refiner,
-                )
 
             # Postprocessing
             from engines.postprocess import apply_postprocessing
@@ -312,6 +326,7 @@ class PyTorchEngine(InferenceEngine):
                 despeckle_strength=request.despeckle,
                 matte_cleanup_strength=request.matte_cleanup,
             )
+            _t = _tick("postprocess", _t)
 
             alpha_3ch = alpha[:, :, np.newaxis].astype(np.float32) / 255.0
             comp = (fg.astype(np.float32) * alpha_3ch).astype(np.uint8)
@@ -339,6 +354,11 @@ class PyTorchEngine(InferenceEngine):
                 output_argb[:, :, 3] = comp[:, :, 2]
             else:
                 output_argb = argb
+
+            _t = _tick("compose_output", _t)
+            total_ms = (_time.perf_counter() - _t_total) * 1000
+            breakdown = "  ".join(f"{k}={v:.0f}ms" for k, v in _steps)
+            logger.info("Process breakdown: total=%.0fms  %s", total_ms, breakdown)
 
             return InferenceResult(image=output_argb, success=True)
 
