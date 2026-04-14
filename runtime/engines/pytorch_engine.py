@@ -272,10 +272,8 @@ class PyTorchEngine(InferenceEngine):
                             alpha_hint.shape[1], alpha_hint.shape[0])
 
             # Quality-mode dispatch — handler.py stashes the quality on the
-            # request as `_use_direct` for non-tiled modes; we still want to
-            # know the actual quality value so we look it up via tile_size or
-            # a custom attr the handler attaches. Fall back to default if we
-            # can't tell (preserves old behaviour).
+            # request via a `_quality_mode` attr. Fall back to the default
+            # (Full Res) if a caller forgets to set it.
             quality_mode = getattr(request, "_quality_mode", _DEFAULT_QUALITY)
             model_img_size, skip_refiner = _quality_profile(quality_mode)
 
