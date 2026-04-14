@@ -215,21 +215,6 @@ See [open issues](https://github.com/iamjoshuadavies/corridorkey-ae/issues) for 
       the runtime next to the `.aex`, drop the dev env var requirement
 - [ ] **Float32 pipeline** (#10) — skip uint8 quantization for 32bpc projects
 
-### Investigated and closed as not-worth-doing
-
-- **Async / non-blocking render** (#6) — architecturally blocked by AE's
-  synchronous render model. The SDK has no "I'll get back to you"
-  callback and no sanctioned way to invalidate a single frame from a
-  background thread. Returning a placeholder poisons AE's cache.
-  Background engine loading and the two-tier frame cache already
-  handle the interactive cases that matter.
-- **Parallel MFR inference** (#12) — the GPU itself serializes, so
-  multiple MFR threads running inference concurrently would gain
-  ~15–25% steady-state throughput from CPU/GPU overlap at best (not
-  2x), in exchange for a connection pool + thread-safe runtime
-  handler + engine-level locking. Not worth it at current per-frame
-  speeds (190–610 ms on RTX 4090).
-
 ## Credits
 
 Based on the green-screen keying technique created by **Niko Pueringer** of [Corridor Digital](https://youtube.com/CorridorCrew). Model inference via [corridorkey-mlx](https://github.com/nikopueringer/corridorkey-mlx).
