@@ -11,7 +11,6 @@ import hashlib
 import logging
 import platform
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger("corridorkey.models")
 
@@ -35,7 +34,7 @@ def get_models_dir() -> Path:
 class ModelManager:
     """Manages model weights: discovery, download, verification."""
 
-    def __init__(self, models_dir: Optional[Path] = None) -> None:
+    def __init__(self, models_dir: Path | None = None) -> None:
         self.models_dir = models_dir or get_models_dir()
 
     def is_model_available(self, model_name: str) -> bool:

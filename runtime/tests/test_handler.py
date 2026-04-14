@@ -4,7 +4,6 @@ import json
 import struct
 
 import numpy as np
-
 from server.handler import RequestHandler
 
 
@@ -155,3 +154,92 @@ def test_frame_count_increments():
     resp = handler.handle_raw(b'{"type": "status"}')
     data = json.loads(resp)
     assert data["frames_processed"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for cache-hash bugs fixed during the Windows port
+# ---------------------------------------------------------------------------
+
+
+def test_cache_miss_when_hint_edited_mid_frame():
+    """Regression for the corner-only pixel hash bug.
+
+    Previously `FrameCache.hash_pixels` sampled only first 16 KB + last
+    16 KB of the buffer, so changes in the middle of the hint mask
+    (the subject area, where keying matters) never flipped the hash
+    and the cache returned stale output. Full-buffer hashing fixes it.
+    """
+    handler = RequestHandler()
+
+    # 1080p-shaped mini frame — big enough that the corner-sampling bug
+    # would have been triggered by the old hash implementation.
+    width, height = 256, 256
+    pixels = np.zeros((height, width, 4), dtype=np.uint8)
+    pixels[:, :, 0] = 255  # A
+    pixels[:, :, 1] = 128  # R
+
+    # Hint A: all-white in the middle, all-black at the edges
+    hint_a = np.zeros((height, width, 4), dtype=np.uint8)
+    hint_a[:, :, 0] = 255  # A
+    hint_a[height // 4:3 * height // 4, width // 4:3 * width // 4, 1:] = 255  # white center
+
+    # Hint B: same edges, DIFFERENT center fill — should flip the hash.
+    hint_b = hint_a.copy()
+    hint_b[height // 4:3 * height // 4, width // 4:3 * width // 4, 1:] = 128  # gray center
+
+    msg_a = _build_frame_msg(
+        width, height, pixels,
+        has_hint=True, hint_pixels=hint_a, hint_width=width, hint_height=height,
+    )
+    msg_b = _build_frame_msg(
+        width, height, pixels,
+        has_hint=True, hint_pixels=hint_b, hint_width=width, hint_height=height,
+    )
+
+    # Both should be cache misses — different hint content means different key.
+    handler.handle_raw(msg_a)
+    handler.handle_raw(msg_b)
+    status = json.loads(handler.handle_raw(b'{"type": "status"}'))
+    assert status["cache"]["misses"] >= 2, (
+        "Both frames should miss the cache — hint content differs"
+    )
+
+
+def test_cache_miss_when_quality_mode_changes():
+    """Changing the Quality dropdown must invalidate the response cache.
+
+    Regression for a phase during the Windows port where quality_mode
+    wasn't part of the handler's frame cache key, so switching from
+    Full Res to Fastest on the same frame returned stale output.
+    """
+    handler = RequestHandler()
+
+    width, height = 32, 32
+    pixels = np.zeros((height, width, 4), dtype=np.uint8)
+    pixels[:, :, 0] = 255
+
+    # Same frame, different quality — should miss on both.
+    def _msg_with_quality(quality: int) -> bytes:
+        rowbytes = width * 4
+        msg = bytearray()
+        msg += b"FRAME"
+        msg += struct.pack(">I", width)
+        msg += struct.pack(">I", height)
+        msg += struct.pack(">I", rowbytes)
+        msg += struct.pack("B", 0)              # output_mode
+        msg += struct.pack(">f", 0.5)           # despill
+        msg += struct.pack(">f", 0.0)           # despeckle
+        msg += struct.pack(">f", 0.5)           # refiner
+        msg += struct.pack(">f", 0.0)           # matte_cleanup
+        msg += struct.pack("B", quality)        # quality_mode
+        msg += struct.pack("B", 0)              # has_hint
+        msg += pixels.tobytes()
+        return bytes(msg)
+
+    handler.handle_raw(_msg_with_quality(0))    # Fastest
+    handler.handle_raw(_msg_with_quality(3))    # Full Res (Tiled)
+
+    status = json.loads(handler.handle_raw(b'{"type": "status"}'))
+    assert status["cache"]["misses"] >= 2, (
+        "Both quality modes should miss — quality_mode must be in the cache key"
+    )
