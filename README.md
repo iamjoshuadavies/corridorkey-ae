@@ -6,7 +6,7 @@
 
 <p align="center">
   Native Adobe After Effects plugin for advanced green-screen keying.<br>
-  Based on the technique created by <strong>Niko Pueringer</strong> of <a href="https://youtube.com/CorridorCrew">Corridor Digital</a>.
+  Based on the technique created by my friend <strong>Niko Pueringer</strong> of <a href="https://youtube.com/CorridorCrew">Corridor Digital</a>.
 </p>
 
 <p align="center">
@@ -214,26 +214,54 @@ corridorkey-ae/
 
 ## Downloads
 
-Every push to `main` produces macOS and Windows builds as downloadable
-artifacts from the [Actions tab](https://github.com/iamjoshuadavies/corridorkey-ae/actions).
+### For developers — CI build artifacts
+
+Every push to `main` produces raw plugin binaries (`.plugin` for
+macOS, `.aex` for Windows) as downloadable artifacts from the
+[Actions tab](https://github.com/iamjoshuadavies/corridorkey-ae/actions).
 Open the latest successful CI run and grab `CorridorKey-macOS` or
 `CorridorKey-Windows` from the Artifacts section.
 
-Tagged releases with signed, installable builds are planned for M6 —
-see [open issues](https://github.com/iamjoshuadavies/corridorkey-ae/issues)
-for progress.
+**These are developer-only builds.** They contain just the plugin
+binary — no Python runtime, no dependencies, no model weights. To
+actually use them you need a source checkout of this repo with
+`runtime/.venv/` set up, and the `CORRIDORKEY_REPO_ROOT` env var
+pointing at it. See [Building](#building) below.
+
+### For end users — full installers
+
+Full double-click installers that bundle everything needed (Python
+interpreter, all dependencies, the plugin itself — model weights
+still auto-download on first run) are planned for the first tagged
+release. Track progress in [#28](https://github.com/iamjoshuadavies/corridorkey-ae/issues/28).
+
+Until then, you need to build from source.
 
 ## Remaining Work
 
 See [open issues](https://github.com/iamjoshuadavies/corridorkey-ae/issues) for the full backlog. Key items:
 
-- [ ] **Windows codesigning + installer** (#24) — MSI or NSIS, bundle
-      the runtime next to the `.aex`, drop the dev env var requirement
+- [ ] **Full installers for macOS + Windows** (#28) — bundled Python
+      interpreter via [python-build-standalone](https://github.com/astral-sh/python-build-standalone),
+      `.pkg` on macOS via `pkgbuild`/`productbuild`, `.exe` on Windows
+      via InnoSetup. One-click install, no terminal, no env vars.
 - [ ] **Float32 pipeline** (#10) — skip uint8 quantization for 32bpc projects
 
 ## Credits
 
-Based on the green-screen keying technique created by **Niko Pueringer** of [Corridor Digital](https://youtube.com/CorridorCrew). Model inference via [corridorkey-mlx](https://github.com/nikopueringer/corridorkey-mlx).
+Based on the green-screen keying technique created by my friend
+**Niko Pueringer** of [Corridor Digital](https://youtube.com/CorridorCrew).
+Niko did all the hard research work — the physical unmixing model, the
+training, the whole insight that you can actually separate foreground
+and background with this kind of fidelity. Model inference runs through
+his [corridorkey-mlx](https://github.com/nikopueringer/corridorkey-mlx)
+package on macOS and a vendored PyTorch port on Windows.
+
+This After Effects port was started by **Josh Davies**
+([@iamjoshuadavies](https://github.com/iamjoshuadavies)) — wrapping
+Niko's model in a real AE plugin so compositors can use it the way
+they use Keylight. Hopefully more amazing and worthy developers
+will carry it on from here. PRs welcome.
 
 This project builds against the **Adobe After Effects SDK**, which is
 © Adobe Inc. The SDK is not included in this source repository — see
