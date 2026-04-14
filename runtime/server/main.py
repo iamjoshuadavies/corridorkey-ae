@@ -51,22 +51,20 @@ def create_engine(model_path: Optional[str] = None, tile_size: int = 512) -> Opt
         logger.exception("Failed to initialize MLX engine")
 
     # --- 2. PyTorch (CUDA on Windows/Linux, CPU fallback) ---
+    # Don't gate on a precheck — let load_model("") handle discovery and
+    # downloading internally. The first run on a fresh install pulls the
+    # ~398 MB weights from the corridorkey-mlx GitHub release.
     try:
-        from engines.pytorch_engine import PyTorchEngine, find_pytorch_checkpoint
+        from engines.pytorch_engine import PyTorchEngine
 
-        pt_weights = Path(model_path) if model_path else find_pytorch_checkpoint()
-        if pt_weights is None or not pt_weights.exists():
-            logger.warning(
-                "No PyTorch checkpoint found. Set EZ_CORRIDORKEY_PATH or "
-                "install EZ-CorridorKey to ~/Desktop/EZ-CorridorKey."
-            )
-        else:
-            engine = PyTorchEngine(prefer_fp16=True)
-            engine.load_model(str(pt_weights))
-            logger.info("PyTorch engine ready: %s", engine.device_name)
-            return engine
+        engine = PyTorchEngine(prefer_fp16=True)
+        engine.load_model(model_path or "")
+        logger.info("PyTorch engine ready: %s", engine.device_name)
+        return engine
     except ImportError as e:
         logger.info("PyTorch engine unavailable: %s", e)
+    except FileNotFoundError as e:
+        logger.warning("PyTorch engine not started: %s", e)
     except Exception:
         logger.exception("Failed to initialize PyTorch engine")
 

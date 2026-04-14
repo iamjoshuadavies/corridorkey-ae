@@ -30,7 +30,7 @@ from numpy.typing import NDArray
 
 from engines.base import InferenceEngine, InferenceRequest, InferenceResult
 from engines._greenformer import GreenFormer, load_state_dict_into
-from engines._weights_loader import find_or_download_weights, load_state_dict_from_path
+from engines._weights_loader import find_or_download_weights, load_state_dict_from_path  # noqa: F401
 
 logger = logging.getLogger("corridorkey.engines.pytorch")
 
@@ -346,13 +346,3 @@ class PyTorchEngine(InferenceEngine):
             return InferenceResult(image=request.image, success=False, error=str(e))
 
 
-# ---------------------------------------------------------------------------
-# Public discovery shim — used by server/main.py to decide whether to even
-# try the PyTorch engine path. Returning None means "no weights available".
-# ---------------------------------------------------------------------------
-
-def find_pytorch_checkpoint() -> Optional[Path]:
-    located = find_or_download_weights(allow_download=False)
-    if located is None:
-        return None
-    return located[0]
