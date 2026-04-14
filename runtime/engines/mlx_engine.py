@@ -152,18 +152,18 @@ class MLXEngine(InferenceEngine):
             rgb[:, :, 1] = argb[:, :, 2]  # G
             rgb[:, :, 2] = argb[:, :, 3]  # B
 
-            # Build cache key for raw model output: pixel content + refiner + mode + hint
-            # Post-processing params (despill, despeckle, cleanup) are NOT in this key
+            # Build cache key for raw model output: pixel content + refiner + mode + hint.
+            # Post-processing params (despill, despeckle, cleanup) are NOT in this key.
+            # Hash the FULL buffer — sampling first/last few rows misses
+            # mid-frame edits to the hint mask, which is exactly where
+            # keying matters.
             import hashlib
             alpha_hint = getattr(request, '_alpha_hint', None)
-            pixel_sample = rgb[:4].tobytes() + rgb[-4:].tobytes()
-            hint_sample = b""
-            if alpha_hint is not None:
-                hint_sample = alpha_hint[:4].tobytes() + alpha_hint[-4:].tobytes()
-            raw_key = hashlib.md5(
-                pixel_sample + hint_sample
-                + f":{request.refiner:.3f}:{use_tiled}:{h}:{w}".encode()
-            ).hexdigest()
+            pix_md5 = hashlib.md5(rgb.tobytes()).hexdigest()
+            hint_md5 = hashlib.md5(alpha_hint.tobytes()).hexdigest() if alpha_hint is not None else "none"
+            raw_key = (
+                f"{pix_md5}:{hint_md5}:{request.refiner:.3f}:{use_tiled}:{h}:{w}"
+            )
 
             # Check raw cache — skip inference if same frame + refiner + hint
             if raw_key == self._raw_cache_key and self._raw_cache_alpha is not None:

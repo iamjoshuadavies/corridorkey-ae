@@ -87,15 +87,16 @@ class FrameCache:
 
     @staticmethod
     def hash_pixels(data: bytes) -> str:
-        """Fast hash of pixel data. Uses xxhash-style sampling for speed."""
-        # Hash first 16KB + last 16KB + length for speed on large frames
-        sample_size = 16384
-        if len(data) <= sample_size * 2:
-            return hashlib.md5(data).hexdigest()
-        sample = data[:sample_size] + data[-sample_size:]
-        h = hashlib.md5(sample)
-        h.update(len(data).to_bytes(8, "big"))
-        return h.hexdigest()
+        """Hash of pixel data. MD5 over the full buffer.
+
+        We used to sample first 16 KB + last 16 KB only, which was fast but
+        catastrophically wrong for hint masks: changes in the middle of the
+        image (i.e. the subject area, where keying actually happens) didn't
+        flip the corner-only sample, so the cache returned stale output. For
+        a 1080p ARGB frame (~8 MB) MD5 takes ~16 ms — small compared to
+        inference cost, and correct.
+        """
+        return hashlib.md5(data).hexdigest()
 
     def get(
         self, width: int, height: int, pixel_hash: str,

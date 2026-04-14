@@ -270,13 +270,14 @@ class PyTorchEngine(InferenceEngine):
             quality_mode = getattr(request, "_quality_mode", _DEFAULT_QUALITY)
             model_img_size, skip_refiner = _quality_profile(quality_mode)
 
-            # Cache key for raw model output
-            pixel_sample = rgb[:4].tobytes() + rgb[-4:].tobytes()
-            hint_sample = alpha_hint[:4].tobytes() + alpha_hint[-4:].tobytes()
-            raw_key = hashlib.md5(
-                pixel_sample + hint_sample
-                + f":{request.refiner:.3f}:{h}:{w}:{quality_mode}".encode()
-            ).hexdigest()
+            # Cache key for raw model output. Hash the FULL buffers — sampling
+            # only first/last few rows misses mid-frame edits to the hint mask
+            # (which is where keying actually matters).
+            pix_md5  = hashlib.md5(rgb.tobytes()).hexdigest()
+            hint_md5 = hashlib.md5(alpha_hint.tobytes()).hexdigest()
+            raw_key = (
+                f"{pix_md5}:{hint_md5}:{request.refiner:.3f}:{h}:{w}:{quality_mode}"
+            )
 
             if raw_key == self._raw_cache_key and self._raw_cache_alpha is not None:
                 alpha = self._raw_cache_alpha.copy()
