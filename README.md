@@ -61,14 +61,36 @@ CorridorKey AE brings physically accurate green-screen separation directly into 
 
 ## Performance
 
-| Quality Mode | Resolution | Speed (M1/M2) | Use Case |
-|-------------|-----------|---------------|----------|
-| Fastest (256) | Downscale to 256 | ~0.1s | Scrubbing, quick preview |
-| Fast (512) | Downscale to 512 | ~0.3s | Interactive work |
-| High (1024) | Downscale to 1024 | ~1-2s | Higher quality preview |
-| Full Res (Tiled) | Native resolution | ~4.6s at 1080p | Final render, production |
+**macOS (M1/M2 via MLX)** — tiled inference, working resolution per preset:
 
-Cached frames return instantly. Changing post-processing sliders (despill, despeckle, cleanup) skips model inference and re-applies only the cheap post-processing (~10ms).
+| Quality Mode | Resolution | Speed | Use Case |
+|---|---|---|---|
+| Fastest (256) | Downscale to 256 | ~0.1 s | Scrubbing, quick preview |
+| Fast (512) | Downscale to 512 | ~0.3 s | Interactive work |
+| High (1024) | Downscale to 1024 | ~1–2 s | Higher quality preview |
+| Full Res (Tiled) | Native resolution | ~4.6 s at 1080p | Final render, production |
+
+**Windows (RTX 4090 via PyTorch CUDA, fp16)** — each preset switches to a
+different model size (pos_embed bicubic-interpolated at load time):
+
+| Quality Mode | Model | Speed (1080p input) |
+|---|---|---|
+| Fastest (256) | 512 no refiner | ~165 ms |
+| Fast (512) | 512 + refiner | ~173 ms |
+| High (1024) | 1024 + refiner | ~234 ms |
+| Full Res | 2048 + refiner | ~558 ms |
+
+All three model sizes stay live on the GPU together (~0.5 GB total VRAM)
+so switching Quality doesn't trigger a reload. Cached frames return
+instantly. Changing post-processing sliders (despill, despeckle, cleanup)
+skips model inference and re-applies only the cheap post-processing
+(~10 ms).
+
+**First run on a fresh install** takes longer: the runtime downloads
+~398 MB of weights from the upstream GitHub release, builds the model
+on the GPU, and warms CUDA kernels. The effect panel shows
+**"Loading model (...)"** status during the wait; AE stays responsive.
+Every subsequent launch uses the cached weights and is near-instant.
 
 ## Building
 
@@ -184,15 +206,16 @@ corridorkey-ae/
 
 See [open issues](https://github.com/iamjoshuadavies/corridorkey-ae/issues) for the full backlog. Key items:
 
-- [ ] **Unify the macOS + Windows weight downloaders** — both platforms
-      currently fetch the same `corridorkey_mlx.safetensors` from the same
-      GitHub release, but via different code paths (Mac uses the upstream
-      pip package's helper, Windows uses our urllib downloader). One
-      shared code path would be simpler.
+- [ ] **Async render** (#6) — non-blocking inference so AE stays
+      responsive during normal playback / scrubbing (first-run UX is
+      already handled — the engine loads in a background thread and
+      the render path shows a loading status instead of freezing).
 - [ ] **Parallel MFR inference** (#12) — connection pool for multi-threaded rendering
 - [ ] **Float32 pipeline** (#10) — skip uint8 quantization for 32bpc projects
-- [ ] **Async render** (#6) — non-blocking inference for smoother UI
-- [ ] **Packaging** (M6) — installer, signing, notarization, GitHub Releases
+- [ ] **macOS regression retest** (#23) — after the Windows port refactor
+- [ ] **Windows codesigning + installer** (#24) — MSI or NSIS, bundle
+      the runtime next to the `.aex`, drop the dev env var requirement
+- [ ] **CI** (#26) — GitHub Actions matrix build for macOS + Windows
 
 ## Credits
 

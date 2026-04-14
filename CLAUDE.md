@@ -49,10 +49,11 @@ Copy-Item -Force "build_win/plugin/Release/CorridorKey.aex" \
 # For a source-tree dev workflow set the env var once:
 [Environment]::SetEnvironmentVariable('CORRIDORKEY_REPO_ROOT', 'C:\Users\iamjo\Documents\corridorkey-ae', 'User')
 
-# Runtime venv (no MLX on Windows yet — minimal deps for fallback overlay)
+# Runtime venv (Windows PyTorch + CUDA + model deps)
 cd runtime
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install msgpack numpy Pillow opencv-python-headless
+.\.venv\Scripts\python.exe -m pip install msgpack numpy Pillow opencv-python-headless timm safetensors
+.\.venv\Scripts\python.exe -m pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 --index-url https://download.pytorch.org/whl/cu121
 
 # Start runtime manually
 .\.venv\Scripts\python.exe -m server.main --port 12345
@@ -125,17 +126,36 @@ launcher chain swallows stdout before it reaches the parent's pipe).
 
 ## Current Features
 - Smart Render: 8bpc, 16bpc, 32bpc float
-- Multi-Frame Rendering (threaded, serialized via mutex)
+- Multi-Frame Rendering (threaded, serialized via bridge mutex)
 - Auto-launch runtime subprocess (fork/exec on macOS, CreateProcessW on
-  Windows; port discovery via temp file, with stdout pipe as macOS fallback)
+  Windows; port discovery via temp file)
+- Background engine loading: IPC server binds immediately, engine loads
+  in a background thread, handler returns `LOADING` responses in the
+  meantime. The render path blocks on the runtime's ready state instead
+  of caching pass-through frames as the final result.
 - Reconnect with exponential backoff cooldown
-- Zombie process cleanup on re-launch
-- Custom Drawbot UI: logo, title, tagline, clickable About link
+- Clean process-tree shutdown on Windows via a Job Object with
+  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` — terminates the venv launcher
+  and the real python child atomically, no orphans. Runtime also
+  honours the graceful JSON shutdown message via a delayed
+  `os._exit(0)` from a daemon thread so the ack flushes first.
+- Custom Drawbot UI: logo, title, tagline, clickable About link, live
+  status line (Ready / Loading model / Bridge error)
 - Alpha hint layer input (PF_ADD_LAYER)
 - Output modes: Processed, Matte, Foreground, Composite
 - Effect params: Output Mode, Alpha Hint, Quality, Despill, Despeckle, Refiner, Matte Cleanup
-- Tiled inference for full-resolution output
+- Tiled inference for full-resolution output (MLX) / native 2048 per
+  quality size (PyTorch)
 - Debug image saves gated behind CK_DEBUG=1 env var
+
+## Quality gates
+- Python runtime: `ruff check` clean, `mypy --config-file pyproject.toml`
+  (strict + warn_return_any) clean, 23/23 tests passing under
+  `pytest tests/`. Tests are CI-ready: no network, no GPU, no real
+  weights required.
+- C++ plugin: MSVC `/W4` clean on Windows with two narrow silences
+  (`/wd4100` for AE-SDK callback unref-params, `/wd4201` for
+  SDK-header nameless unions). macOS uses Xcode defaults.
 
 ## AE Plugin Debugging
 
