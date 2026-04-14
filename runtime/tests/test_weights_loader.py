@@ -75,8 +75,14 @@ def test_reverse_conversion_shape_roundtrip(tmp_path):
 
     Confirms the key rename + conv transpose math is correct without
     needing a real 400 MB checkpoint or a GPU.
+
+    Skipped when torch / safetensors aren't installed — both are
+    Windows-facing deps (the PyTorch engine path). macOS CI and the
+    baseline Linux test runner don't pull them in; installing them
+    just for this one test would bloat the CI by 2 GB.
     """
-    from safetensors.numpy import save_file
+    pytest.importorskip("torch")
+    save_file = pytest.importorskip("safetensors.numpy").save_file
 
     # Two stem keys that need renaming + transposing
     # MLX layout: conv weights are (O, H, W, I)
