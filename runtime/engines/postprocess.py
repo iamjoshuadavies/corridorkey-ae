@@ -90,20 +90,23 @@ def clean_matte(
         if stats[i, cv2.CC_STAT_AREA] >= area_threshold:
             cleaned_mask[labels == i] = 255
 
-    # Dilate to restore edges
+    # Dilate to restore edges. cv2 ops return a generic ndarray — annotate
+    # explicitly so we don't drift off uint8 at the type level.
+    dilated: np.ndarray = cleaned_mask
     if dilation > 0:
         kernel_size = int(dilation * 2 + 1)
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-        cleaned_mask = cv2.dilate(cleaned_mask, kernel)
+        dilated = cv2.dilate(dilated, kernel)
 
     # Blur for smooth transitions
     if blur_size > 0:
         b_size = int(blur_size * 2 + 1)
-        cleaned_mask = cv2.GaussianBlur(cleaned_mask, (b_size, b_size), 0)
+        dilated = cv2.GaussianBlur(dilated, (b_size, b_size), 0)
 
     # Convert back to float safe zone and apply
-    safe_zone = cleaned_mask.astype(np.float32) / 255.0
-    return alpha * safe_zone
+    safe_zone = dilated.astype(np.float32) / 255.0
+    result: np.ndarray = alpha * safe_zone
+    return result
 
 
 def apply_postprocessing(
@@ -145,12 +148,14 @@ def apply_postprocessing(
         blur_sigma = 0.5 + matte_cleanup_strength * 2.0
         ksize = int(blur_sigma * 4) | 1  # Ensure odd
         if ksize >= 3:
-            alpha_f = cv2.GaussianBlur(alpha_f, (ksize, ksize), blur_sigma)
+            alpha_f = cv2.GaussianBlur(alpha_f, (ksize, ksize), blur_sigma).astype(
+                np.float32
+            )
 
         # Push towards binary (crush blacks/whites)
         low = 0.05 + matte_cleanup_strength * 0.15   # black point
         high = 0.95 - matte_cleanup_strength * 0.15   # white point
-        alpha_f = np.clip((alpha_f - low) / (high - low), 0.0, 1.0)
+        alpha_f = np.clip((alpha_f - low) / (high - low), 0.0, 1.0).astype(np.float32)
 
     # 3. Despill (green removal from foreground)
     if despill_strength > 0.05:

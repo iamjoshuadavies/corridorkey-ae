@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import math
 from collections import OrderedDict
+from typing import Any, cast
 
 import timm
 import torch
@@ -48,7 +49,9 @@ class _MLP(nn.Module):
         self.proj = nn.Linear(input_dim, embed_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.proj(x)
+        # torch's public stubs type nn.Linear.__call__ as returning Any; cast
+        # to keep the rest of the module strictly typed.
+        return cast(torch.Tensor, self.proj(x))
 
 
 class _DecoderHead(nn.Module):
@@ -88,7 +91,7 @@ class _DecoderHead(nn.Module):
         fused = self.bn(fused)
         fused = F.relu(fused)
         fused = F.dropout(fused, p=DROPOUT_RATE, training=self.training)
-        return self.classifier(fused)
+        return cast(torch.Tensor, self.classifier(fused))
 
 
 class _RefinerBlock(nn.Module):
@@ -137,7 +140,7 @@ class _CNNRefinerModule(nn.Module):
         x = self.res2(x)
         x = self.res3(x)
         x = self.res4(x)
-        return self.final(x) * REFINER_SCALE
+        return cast(torch.Tensor, self.final(x) * REFINER_SCALE)
 
 
 class GreenFormer(nn.Module):
@@ -267,10 +270,12 @@ def interpolate_pos_embed(
     embed = F.interpolate(
         embed, size=(target_side, target_side), mode="bicubic", align_corners=False
     )
-    return embed.permute(0, 2, 3, 1).reshape(1, target_n, embed_dim)
+    return cast(torch.Tensor, embed.permute(0, 2, 3, 1).reshape(1, target_n, embed_dim))
 
 
-def load_state_dict_into(model: GreenFormer, state_dict: dict) -> tuple[list, list]:
+def load_state_dict_into(
+    model: GreenFormer, state_dict: dict[str, Any],
+) -> tuple[list[str], list[str]]:
     """Load a (cleaned) PyTorch state_dict into the model, interpolating
     pos_embed if the checkpoint and model were built at different img_sizes.
 

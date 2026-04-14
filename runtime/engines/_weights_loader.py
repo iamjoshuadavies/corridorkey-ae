@@ -38,6 +38,7 @@ import os
 import sys
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger("corridorkey.engines.weights")
 
@@ -168,7 +169,7 @@ _PYTORCH_CONV_WEIGHT_KEYS: frozenset[str] = frozenset(
 )
 
 
-def _convert_mlx_safetensors_to_pytorch(path: Path) -> dict:
+def _convert_mlx_safetensors_to_pytorch(path: Path) -> dict[str, Any]:
     """Load an MLX-format safetensors file and return a PyTorch state_dict.
 
     Reverse of nikopueringer/corridorkey-mlx convert/converter.py.
@@ -177,7 +178,7 @@ def _convert_mlx_safetensors_to_pytorch(path: Path) -> dict:
     from safetensors.numpy import load_file
 
     raw = load_file(str(path))
-    state_dict: dict = {}
+    state_dict: dict[str, Any] = {}
     for src_key, arr in raw.items():
         dest_key = _REFINER_STEM_REVERSE_MAP.get(src_key, src_key)
         if dest_key in _PYTORCH_CONV_WEIGHT_KEYS:
@@ -187,7 +188,7 @@ def _convert_mlx_safetensors_to_pytorch(path: Path) -> dict:
     return state_dict
 
 
-def _load_pytorch_pth(path: Path) -> dict:
+def _load_pytorch_pth(path: Path) -> dict[str, Any]:
     """Load a .pth checkpoint (CORRIDORKEY_PT_WEIGHTS escape hatch).
 
     Strips the `_orig_mod.` torch.compile prefix from state_dict keys.
@@ -196,7 +197,7 @@ def _load_pytorch_pth(path: Path) -> dict:
 
     raw = torch.load(str(path), map_location="cpu", weights_only=False)
     sd = raw.get("state_dict", raw) if isinstance(raw, dict) else raw
-    cleaned = {}
+    cleaned: dict[str, Any] = {}
     for k, v in sd.items():
         if k.startswith("_orig_mod."):
             cleaned[k[len("_orig_mod."):]] = v
@@ -234,7 +235,7 @@ def resolve_pytorch_weights(allow_download: bool = True) -> tuple[Path, str] | N
     return None
 
 
-def load_pytorch_state_dict(path: Path, fmt: str) -> dict:
+def load_pytorch_state_dict(path: Path, fmt: str) -> dict[str, Any]:
     """Load a state_dict from disk in either supported format."""
     if fmt == "pth":
         return _load_pytorch_pth(path)

@@ -49,8 +49,9 @@ static PF_Err DrawEvent(
         return PF_Err_NONE;
     }
 
-    // Get the Drawbot suites
-    DRAWBOT_Suites suites;
+    // Get the Drawbot suites. Zero-init so MSVC /W4 (C4701) doesn't flag
+    // a "potentially uninitialised use" on the error path below.
+    DRAWBOT_Suites suites = {};
     ERR(AEFX_AcquireDrawbotSuites(in_data, out_data, &suites));
     if (err) return err;
 

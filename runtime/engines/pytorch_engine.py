@@ -22,12 +22,16 @@ from __future__ import annotations
 import hashlib
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from engines._greenformer import GreenFormer, load_state_dict_into
 from engines._weights_loader import load_pytorch_state_dict, resolve_pytorch_weights
 from engines.base import InferenceEngine, InferenceRequest, InferenceResult
+
+if TYPE_CHECKING:
+    import torch
 
 logger = logging.getLogger("corridorkey.engines.pytorch")
 
@@ -62,11 +66,11 @@ class PyTorchEngine(InferenceEngine):
     """
 
     def __init__(self, prefer_fp16: bool = True) -> None:
-        self._device = None
-        self._dtype = None
+        self._device: torch.device | None = None
+        self._dtype: torch.dtype | None = None
         self._prefer_fp16 = prefer_fp16
-        self._raw_state_dict: dict | None = None     # CPU-resident, cached for rebuilds
-        self._models: dict[int, GreenFormer] = {}     # img_size -> built model on device
+        self._raw_state_dict: dict[str, Any] | None = None   # CPU-resident, cached for rebuilds
+        self._models: dict[int, GreenFormer] = {}            # img_size -> built model on device
         self._model_path: str | None = None
 
         # Raw model output cache — same as MLXEngine.
@@ -168,7 +172,7 @@ class PyTorchEngine(InferenceEngine):
 
     def _prepare_input(
         self, rgb: np.ndarray, alpha_hint: np.ndarray, model_img_size: int
-    ) -> tuple[any, tuple[int, int, int, int], tuple[int, int]]:
+    ) -> tuple[torch.Tensor, tuple[int, int, int, int], tuple[int, int]]:
         """Build a [1, 4, model_img_size, model_img_size] tensor from RGB + hint.
 
         Returns the tensor, the (top, left, work_h, work_w) crop box of the
@@ -212,7 +216,10 @@ class PyTorchEngine(InferenceEngine):
         return x, (pad_top, pad_left, work_h, work_w), (h, w)
 
     def _crop_and_unpad(
-        self, output: dict, crop_box: tuple[int,int,int,int], original: tuple[int,int]
+        self,
+        output: dict[str, torch.Tensor],
+        crop_box: tuple[int, int, int, int],
+        original: tuple[int, int],
     ) -> tuple[np.ndarray, np.ndarray]:
         """Crop padded model output back to the original frame dimensions."""
         import torch.nn.functional as F  # noqa: N812  (PyTorch convention)
@@ -281,7 +288,11 @@ class PyTorchEngine(InferenceEngine):
                 f"{pix_md5}:{hint_md5}:{request.refiner:.3f}:{h}:{w}:{quality_mode}"
             )
 
-            if raw_key == self._raw_cache_key and self._raw_cache_alpha is not None:
+            if (
+                raw_key == self._raw_cache_key
+                and self._raw_cache_alpha is not None
+                and self._raw_cache_fg is not None
+            ):
                 alpha = self._raw_cache_alpha.copy()
                 fg = self._raw_cache_fg.copy()
                 logger.info("Raw model cache HIT — skipping inference")

@@ -69,7 +69,11 @@ class IPCServer:
     def run(self) -> None:
         """Start the server and accept connections."""
         if self.socket_path:
-            self._server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            # AF_UNIX is POSIX-only — not present on Windows's socket stub.
+            af_unix = getattr(socket, "AF_UNIX", None)
+            if af_unix is None:
+                raise RuntimeError("Unix domain sockets are not supported on this platform")
+            self._server_socket = socket.socket(af_unix, socket.SOCK_STREAM)
             path = Path(self.socket_path)
             path.unlink(missing_ok=True)
             self._server_socket.bind(str(path))

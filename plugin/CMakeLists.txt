@@ -120,6 +120,14 @@ elseif(WIN32)
         _CRT_SECURE_NO_WARNINGS
         _WINSOCK_DEPRECATED_NO_WARNINGS
     )
+    # Build at /W4 with a narrow set of AE-SDK-specific silences:
+    #   C4100 — unreferenced formal parameter. AE effect handlers take fixed
+    #           (in_data, out_data, params, output, extra) signatures and we
+    #           rarely use all five per command; the warnings are noise.
+    #   C4201 — nonstandard extension: nameless struct/union. Fires inside
+    #           the SDK's own headers (AE_Effect.h's PF_TimeDisplay union),
+    #           not our code — and we don't want to patch SDK headers.
+    target_compile_options(CorridorKeyAE PRIVATE /W4 /wd4100 /wd4201)
 endif()
 
 # --- Version info ---

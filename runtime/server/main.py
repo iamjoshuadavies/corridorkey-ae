@@ -28,6 +28,8 @@ def create_engine(model_path: str | None = None) -> InferenceEngine | None:
       2. PyTorch (CUDA on Windows/Linux with NVIDIA GPU; CPU fallback)
     """
 
+    engine: InferenceEngine | None = None
+
     # --- 1. MLX (Apple Silicon) ---
     try:
         from engines.mlx_engine import MLXEngine, find_model_weights
@@ -35,16 +37,16 @@ def create_engine(model_path: str | None = None) -> InferenceEngine | None:
         if model_path is None:
             weights = find_model_weights()
             if weights is not None:
-                engine = MLXEngine(use_refiner=True)
-                engine.load_model(str(weights))
-                logger.info("MLX engine ready: %s", engine.device_name)
-                return engine
+                mlx = MLXEngine(use_refiner=True)
+                mlx.load_model(str(weights))
+                logger.info("MLX engine ready: %s", mlx.device_name)
+                return mlx
             logger.info("No MLX model weights found — falling through to PyTorch")
         else:
-            engine = MLXEngine(use_refiner=True)
-            engine.load_model(model_path)
-            logger.info("MLX engine ready: %s", engine.device_name)
-            return engine
+            mlx = MLXEngine(use_refiner=True)
+            mlx.load_model(model_path)
+            logger.info("MLX engine ready: %s", mlx.device_name)
+            return mlx
     except ImportError:
         logger.info("corridorkey_mlx not available, skipping MLX engine")
     except Exception:
@@ -57,10 +59,10 @@ def create_engine(model_path: str | None = None) -> InferenceEngine | None:
     try:
         from engines.pytorch_engine import PyTorchEngine
 
-        engine = PyTorchEngine(prefer_fp16=True)
-        engine.load_model(model_path or "")
-        logger.info("PyTorch engine ready: %s", engine.device_name)
-        return engine
+        pt = PyTorchEngine(prefer_fp16=True)
+        pt.load_model(model_path or "")
+        logger.info("PyTorch engine ready: %s", pt.device_name)
+        return pt
     except ImportError as e:
         logger.info("PyTorch engine unavailable: %s", e)
     except FileNotFoundError as e:
@@ -69,7 +71,7 @@ def create_engine(model_path: str | None = None) -> InferenceEngine | None:
         logger.exception("Failed to initialize PyTorch engine")
 
     logger.warning("No inference engine available — running in mock mode")
-    return None
+    return engine
 
 
 def main() -> None:

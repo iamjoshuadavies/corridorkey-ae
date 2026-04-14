@@ -586,7 +586,8 @@ struct RuntimeBridge::Impl {
 
         struct sockaddr_in addr{};
         addr.sin_family = AF_INET;
-        addr.sin_port = htons(port);
+        // htons takes u_short; cast explicitly so /W4 doesn't flag C4244.
+        addr.sin_port = htons(static_cast<u_short>(port));
         addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
         if (connect(s, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) != 0) {

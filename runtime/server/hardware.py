@@ -99,7 +99,12 @@ def _get_apple_memory_mb() -> int:
     try:
         import os
 
-        total_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+        # os.sysconf is POSIX-only. On Windows this call site is never
+        # reached, but mypy wants the attribute guarded statically.
+        sysconf = getattr(os, "sysconf", None)
+        if sysconf is None:
+            return 0
+        total_bytes = sysconf("SC_PAGE_SIZE") * sysconf("SC_PHYS_PAGES")
         return int(total_bytes / (1024 * 1024))
     except Exception:
         return 0

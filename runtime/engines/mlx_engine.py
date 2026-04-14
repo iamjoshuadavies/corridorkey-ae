@@ -139,7 +139,11 @@ class MLXEngine(InferenceEngine):
             )
 
             # Check raw cache — skip inference if same frame + refiner + hint
-            if raw_key == self._raw_cache_key and self._raw_cache_alpha is not None:
+            if (
+                raw_key == self._raw_cache_key
+                and self._raw_cache_alpha is not None
+                and self._raw_cache_fg is not None
+            ):
                 alpha = self._raw_cache_alpha.copy()
                 fg = self._raw_cache_fg.copy()
                 logger.info("Raw model cache HIT — applying post-processing only")
@@ -153,6 +157,7 @@ class MLXEngine(InferenceEngine):
                         alpha_hint.shape[1], alpha_hint.shape[0],
                     )
 
+                assert self._engine is not None  # is_ready() check above guarantees this
                 # Run inference
                 result = self._engine.process_frame(
                     image=rgb,
@@ -192,7 +197,8 @@ class MLXEngine(InferenceEngine):
                 _PILImage.fromarray(fg, "RGB").save("/tmp/ck_debug_fg.png")
                 _PILImage.fromarray(comp, "RGB").save("/tmp/ck_debug_comp.png")
                 _PILImage.fromarray(rgb, "RGB").save("/tmp/ck_debug_input.png")
-                _PILImage.fromarray(alpha_hint, "L").save("/tmp/ck_debug_hint.png")
+                if alpha_hint is not None:
+                    _PILImage.fromarray(alpha_hint, "L").save("/tmp/ck_debug_hint.png")
                 logger.info("Debug images saved to /tmp/ck_debug_*.png")
 
             output_argb = np.zeros((h, w, 4), dtype=np.uint8)

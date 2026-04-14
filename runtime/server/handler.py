@@ -47,7 +47,7 @@ _FALLBACK_FONT_PATHS = [
 ]
 
 
-def _load_fallback_font(size: int) -> ImageFont.ImageFont:
+def _load_fallback_font(size: int) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
     """Find a truetype font and load at the requested size; bitmap fallback."""
     for path in _FALLBACK_FONT_PATHS:
         try:
@@ -368,6 +368,7 @@ class RequestHandler:
         quality_mode: int = 0,
     ) -> bytes:
         """Process a frame through the real inference engine."""
+        assert self._engine is not None  # guaranteed by caller (_handle_frame_binary)
         try:
             # Convert raw pixel bytes to (H, W, 4) ARGB array
             raw = np.frombuffer(pixel_data, dtype=np.uint8).copy()

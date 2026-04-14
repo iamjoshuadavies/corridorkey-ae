@@ -45,6 +45,20 @@ python_version = "3.10"
 strict = true
 warn_return_any = true
 
+# Platform-specific modules: mlx is only on macOS (Apple Silicon), and
+# corridorkey_mlx is an optional pip extra that's not always installed.
+# timm, safetensors, and cv2 don't ship type stubs.
+[[tool.mypy.overrides]]
+module = [
+    "mlx.*",
+    "corridorkey_mlx.*",
+    "timm",
+    "timm.*",
+    "safetensors.*",
+    "cv2",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
