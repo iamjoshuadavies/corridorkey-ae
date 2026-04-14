@@ -120,6 +120,48 @@ static bool RecvMessage(socket_t sock, std::vector<uint8_t>& payload) {
 }
 
 // =============================================================================
+// Runtime port handoff via temp file
+// =============================================================================
+// The runtime writes "<pid> <port>\n" to <temp>/corridorkey_runtime.port after
+// it binds. Cross-platform; doesn't depend on stdout pipe inheritance through
+// venv launchers (which is unreliable on Windows).
+
+static std::string GetRuntimePortFilePath() {
+#ifdef _WIN32
+    char buf[MAX_PATH] = {};
+    DWORD n = GetTempPathA(MAX_PATH, buf);
+    if (n == 0 || n >= MAX_PATH) return "";
+    return std::string(buf) + "corridorkey_runtime.port";
+#else
+    const char* tmp = getenv("TMPDIR");
+    if (!tmp || !*tmp) tmp = "/tmp";
+    return std::string(tmp) + "/corridorkey_runtime.port";
+#endif
+}
+
+static int ReadRuntimePortFile() {
+    std::string path = GetRuntimePortFilePath();
+    if (path.empty()) return 0;
+    FILE* f = fopen(path.c_str(), "r");
+    if (!f) return 0;
+    int pid = 0, port = 0;
+    int matched = fscanf(f, "%d %d", &pid, &port);
+    fclose(f);
+    if (matched < 2 || port <= 0) return 0;
+    return port;
+}
+
+static void DeleteRuntimePortFile() {
+    std::string path = GetRuntimePortFilePath();
+    if (path.empty()) return;
+#ifdef _WIN32
+    DeleteFileA(path.c_str());
+#else
+    unlink(path.c_str());
+#endif
+}
+
+// =============================================================================
 // Find repo/runtime paths from plugin binary location
 // =============================================================================
 
@@ -149,6 +191,36 @@ static std::string GetPluginBundlePath() {
     }
     return "";
 }
+#else
+// Windows: derive a base dir from the .aex location. Returns the directory
+// containing the plugin DLL itself. On Windows the plugin is typically
+// installed to Program Files (no relation to the repo), so the repo root
+// must come from CORRIDORKEY_REPO_ROOT env var (handled in FindRepoRoot).
+// This is kept for diagnostic/fallback purposes.
+static std::string GetPluginBundlePath() {
+    HMODULE hMod = NULL;
+    if (!GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&GetPluginBundlePath),
+            &hMod)) {
+        return "";
+    }
+    wchar_t buf[MAX_PATH] = {};
+    DWORD n = GetModuleFileNameW(hMod, buf, MAX_PATH);
+    if (n == 0 || n == MAX_PATH) return "";
+    // Convert UTF-16 -> UTF-8 (best-effort, ASCII paths in practice)
+    std::string path;
+    path.reserve(n);
+    int u8_len = WideCharToMultiByte(CP_UTF8, 0, buf, n, nullptr, 0, nullptr, nullptr);
+    if (u8_len <= 0) return "";
+    path.resize(u8_len);
+    WideCharToMultiByte(CP_UTF8, 0, buf, n, path.data(), u8_len, nullptr, nullptr);
+    // Strip filename, return parent directory using either separator
+    auto pos = path.find_last_of("\\/");
+    if (pos != std::string::npos) path.resize(pos);
+    return path;
+}
 #endif
 
 // =============================================================================
@@ -161,9 +233,13 @@ using time_point = steady_clock::time_point;
 struct RuntimeBridge::Impl {
     bool connected = false;
     socket_t sock = INVALID_SOCK;
-    pid_t child_pid = -1;
+    pid_t child_pid = -1;       // POSIX pid; on Windows used as a launched-flag (1 = launched)
     int runtime_port = 0;
-    int stdout_pipe = -1;       // Pipe to read subprocess stdout
+    int stdout_pipe = -1;       // POSIX pipe fd (unused on Windows)
+
+#ifdef _WIN32
+    HANDLE win_proc = NULL;     // Child runtime process handle
+#endif
 
     // Thread safety: MFR calls render from multiple threads
     std::mutex bridge_mutex;
@@ -205,9 +281,22 @@ struct RuntimeBridge::Impl {
     std::string FindRepoRoot() {
         if (repo_root_resolved) return repo_root;
         repo_root_resolved = true;
-#ifndef _WIN32
+
+        // 1. Explicit override via env var (primary mechanism on Windows where
+        //    the .aex is installed in Program Files with no path-relationship
+        //    to the source repo).
+        if (const char* env = std::getenv("CORRIDORKEY_REPO_ROOT")) {
+            if (env[0] != '\0') {
+                repo_root = env;
+                return repo_root;
+            }
+        }
+
+        // 2. Derive from the plugin binary location. On macOS this resolves
+        //    the AE symlink back into the build tree. On Windows this gives
+        //    the .aex's parent directory — only useful if the user copied
+        //    the .aex back into the build tree manually.
         repo_root = GetPluginBundlePath();
-#endif
         return repo_root;
     }
 
@@ -323,7 +412,96 @@ struct RuntimeBridge::Impl {
         // Timeout
         return runtime_port > 0;
 #else
-        return false; // Windows: TODO
+        // ---------- Windows ----------
+        std::string root = FindRepoRoot();
+        if (root.empty()) return false;
+
+        std::string runtime_dir = root + "/runtime";
+        std::string python      = root + "/runtime/.venv/Scripts/python.exe";
+
+        // Check the venv exists
+        DWORD attr = GetFileAttributesA(python.c_str());
+        if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+            return false;
+        }
+
+        // Wipe any stale port file so we don't read it as our own.
+        DeleteRuntimePortFile();
+
+        // Build the command line. Quote the python path; argv0 must be the
+        // venv python (not a copy elsewhere) so Python detects its venv.
+        std::string cmdline = "\"" + python + "\" -m server.main --port 0 --tile-size 512";
+        // CreateProcessW needs a writable wide buffer
+        std::wstring wcmd;
+        {
+            int n = MultiByteToWideChar(CP_UTF8, 0, cmdline.c_str(), -1, nullptr, 0);
+            wcmd.resize(n > 0 ? n : 0);
+            if (n > 0) MultiByteToWideChar(CP_UTF8, 0, cmdline.c_str(), -1, wcmd.data(), n);
+        }
+        std::wstring wcwd;
+        {
+            int n = MultiByteToWideChar(CP_UTF8, 0, runtime_dir.c_str(), -1, nullptr, 0);
+            wcwd.resize(n > 0 ? n : 0);
+            if (n > 0) MultiByteToWideChar(CP_UTF8, 0, runtime_dir.c_str(), -1, wcwd.data(), n);
+        }
+
+        STARTUPINFOW si{};
+        si.cb          = sizeof(si);
+        si.dwFlags     = STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+
+        PROCESS_INFORMATION pi{};
+        BOOL ok = CreateProcessW(
+            nullptr,                // lpApplicationName
+            wcmd.data(),            // lpCommandLine (writable)
+            nullptr, nullptr,
+            FALSE,                  // bInheritHandles — none
+            CREATE_NO_WINDOW,
+            nullptr,                // lpEnvironment (inherit)
+            wcwd.empty() ? nullptr : wcwd.c_str(),
+            &si, &pi);
+
+        if (!ok) return false;
+
+        CloseHandle(pi.hThread);
+        win_proc  = pi.hProcess;
+        child_pid = 1; // launched-flag for the cross-platform code below
+
+        // Wait up to 30s for the runtime to write its port to the temp file.
+        // (More reliable than reading stdout through a venv launcher chain.)
+        auto start = steady_clock::now();
+        while (std::chrono::duration_cast<std::chrono::seconds>(
+                   steady_clock::now() - start).count() < 30) {
+            int port = ReadRuntimePortFile();
+            if (port > 0) {
+                runtime_port = port;
+                return true;
+            }
+            // Check if the child died early
+            DWORD exit_code = 0;
+            if (GetExitCodeProcess(pi.hProcess, &exit_code) && exit_code != STILL_ACTIVE) {
+                return false;
+            }
+            Sleep(150);
+        }
+        return runtime_port > 0;
+#endif
+    }
+
+    // Set send + recv timeout on a socket. Cross-platform — Windows takes
+    // a DWORD of milliseconds, POSIX takes a struct timeval, and getting
+    // it wrong silently makes timeouts behave nothing like you expect.
+    static void SetSocketTimeoutMs(socket_t s, int ms) {
+#ifdef _WIN32
+        DWORD t = static_cast<DWORD>(ms);
+        setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&t), sizeof(t));
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&t), sizeof(t));
+#else
+        struct timeval tv;
+        tv.tv_sec  = ms / 1000;
+        tv.tv_usec = (ms % 1000) * 1000;
+        setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 #endif
     }
 
@@ -332,11 +510,7 @@ struct RuntimeBridge::Impl {
         if (s == INVALID_SOCK) return false;
 
         // Short connect timeout
-        struct timeval connect_tv;
-        connect_tv.tv_sec = 0;
-        connect_tv.tv_usec = 500000; // 500ms
-        setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, SETSOCKOPT_CAST(&connect_tv), sizeof(connect_tv));
-        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, SETSOCKOPT_CAST(&connect_tv), sizeof(connect_tv));
+        SetSocketTimeoutMs(s, 500);
 
         struct sockaddr_in addr{};
         addr.sin_family = AF_INET;
@@ -348,12 +522,8 @@ struct RuntimeBridge::Impl {
             return false;
         }
 
-        // Connected — set longer I/O timeout for inference
-        struct timeval io_tv;
-        io_tv.tv_sec = 30;
-        io_tv.tv_usec = 0;
-        setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, SETSOCKOPT_CAST(&io_tv), sizeof(io_tv));
-        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, SETSOCKOPT_CAST(&io_tv), sizeof(io_tv));
+        // Connected — switch to longer I/O timeout for inference
+        SetSocketTimeoutMs(s, 30000);
 
         sock = s;
         connected = true;
@@ -573,15 +743,25 @@ void RuntimeBridge::Shutdown()
     }
     m_impl->CloseSocket();
 
-#ifndef _WIN32
+#ifdef _WIN32
+    if (m_impl->win_proc) {
+        // Give the runtime ~500ms to exit cleanly after the JSON shutdown
+        // we sent above; if it doesn't, kill it.
+        if (WaitForSingleObject(m_impl->win_proc, 500) != WAIT_OBJECT_0) {
+            TerminateProcess(m_impl->win_proc, 1);
+            WaitForSingleObject(m_impl->win_proc, 1000);
+        }
+        CloseHandle(m_impl->win_proc);
+        m_impl->win_proc = NULL;
+    }
+    m_impl->child_pid = -1;
+#else
     if (m_impl->stdout_pipe >= 0) {
         close(m_impl->stdout_pipe);
         m_impl->stdout_pipe = -1;
     }
-#endif
 
     if (m_impl->child_pid > 0) {
-#ifndef _WIN32
         kill(m_impl->child_pid, SIGTERM);
         usleep(500000);
         int status;
@@ -589,9 +769,9 @@ void RuntimeBridge::Shutdown()
             kill(m_impl->child_pid, SIGKILL);
             waitpid(m_impl->child_pid, &status, 0);
         }
-#endif
         m_impl->child_pid = -1;
     }
+#endif
 }
 
 bool RuntimeBridge::IsConnected() const

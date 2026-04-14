@@ -11,15 +11,27 @@ Messages can be:
 The handler.handle_raw() method accepts raw bytes and dispatches accordingly.
 """
 
+import atexit
 import logging
+import os
 import socket
 import struct
+import tempfile
 from pathlib import Path
 from typing import Optional
 
 from server.handler import RequestHandler
 
 logger = logging.getLogger("corridorkey.ipc")
+
+
+def runtime_port_file() -> Path:
+    """Path to the well-known port-handoff file used by the AE plugin bridge.
+
+    Lives in the user's temp dir so the C++ bridge can find it without
+    knowing where the runtime is installed. Same on macOS and Windows.
+    """
+    return Path(tempfile.gettempdir()) / "corridorkey_runtime.port"
 
 # 4-byte big-endian length prefix
 HEADER_FORMAT = ">I"
@@ -36,6 +48,24 @@ class IPCServer:
         self._running = False
         self._server_socket: Optional[socket.socket] = None
         self._handler = RequestHandler()
+        self._port_file: Optional[Path] = None
+
+    def _write_port_file(self, port: int) -> None:
+        """Write `<pid> <port>` to the well-known port file. Best-effort."""
+        try:
+            self._port_file = runtime_port_file()
+            self._port_file.write_text(f"{os.getpid()} {port}\n")
+            atexit.register(self._cleanup_port_file)
+            logger.info("Wrote port file: %s", self._port_file)
+        except OSError as e:
+            logger.warning("Could not write port file: %s", e)
+
+    def _cleanup_port_file(self) -> None:
+        if self._port_file is not None:
+            try:
+                self._port_file.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def run(self) -> None:
         """Start the server and accept connections."""
@@ -51,8 +81,12 @@ class IPCServer:
             self._server_socket.bind(("127.0.0.1", self.port))
             actual_port = self._server_socket.getsockname()[1]
             logger.info("Listening on TCP port: %d", actual_port)
-            # Write the port so the plugin can find us
+            # Write the port two ways so the plugin can find us:
+            # 1. stdout (works on macOS where the bridge reads the child pipe directly)
             print(f"PORT:{actual_port}", flush=True)
+            # 2. Temp file (works on Windows where the venv-launcher chain
+            #    swallows stdout before it reaches our parent's pipe)
+            self._write_port_file(actual_port)
 
         self._server_socket.listen(1)
         self._running = True

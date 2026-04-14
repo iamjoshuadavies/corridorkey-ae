@@ -11,13 +11,16 @@
 
 ---
 
-> **Status:** Active development — keying pipeline working end-to-end on macOS (Apple Silicon).
+> **Status:** Active development.
+> - **macOS (Apple Silicon):** keying pipeline working end-to-end via MLX.
+> - **Windows (x64):** plugin builds, loads in AE, and the IPC bridge auto-launches the runtime. Inference engine still to come (see Remaining Work).
 
 ## What It Does
 
-CorridorKey AE brings physically accurate green-screen separation directly into After Effects. Apply the effect, point it at an alpha hint layer, and get production-quality keying with foreground extraction, despill, and matte cleanup — all powered by ML inference running locally on your Mac.
+CorridorKey AE brings physically accurate green-screen separation directly into After Effects. Apply the effect, point it at an alpha hint layer, and get production-quality keying with foreground extraction, despill, and matte cleanup — all powered by ML inference running locally on your machine.
 
 **Key features:**
+- Cross-platform: macOS (Apple Silicon) and Windows (x64)
 - Real-time green-screen keying via MLX on Apple Silicon
 - Tiled inference for full native resolution output (1080p, 4K)
 - Multiple output modes: Processed, Matte, Foreground, Composite
@@ -37,12 +40,13 @@ CorridorKey AE brings physically accurate green-screen separation directly into 
 ┌──────────────────────────┐
 │   After Effects Host     │
 │   CorridorKey Plugin     │  C++ native effect, Drawbot UI, Smart Render
-│   (.plugin / .aex)       │
+│   (.plugin / .aex)       │  macOS bundle on Mac, .aex DLL on Windows
 └──────────┬───────────────┘
-           │ TCP socket (length-prefixed binary)
+           │ TCP socket on 127.0.0.1 (length-prefixed binary)
+           │ Port handed off via temp-file
 ┌──────────▼───────────────┐
-│   Python Runtime         │  corridorkey_mlx, tiled inference, postprocessing
-│   MLX on Apple Silicon   │  ~4.6s/frame at 1080p (Full Res Tiled)
+│   Python Runtime         │  Tiled inference + postprocessing
+│   MLX (Mac) / WIP (Win)  │  Auto-launched as a subprocess on first frame
 └──────────────────────────┘
 ```
 
@@ -59,35 +63,70 @@ Cached frames return instantly. Changing post-processing sliders (despill, despe
 
 ## Building
 
-### Prerequisites
-- macOS with Apple Silicon (M1/M2/M3/M4)
+CorridorKey AE builds from one CMake project on both macOS and Windows.
+
+### Common prerequisites
 - CMake 3.15+
 - Adobe After Effects SDK (place in `ae_sdk/` or set `AE_SDK_PATH`)
-- Xcode Command Line Tools
-- Python 3.10+ (3.12 recommended via Homebrew)
+- Python 3.10+
 
-### Plugin (C++)
+### macOS (Apple Silicon)
+
+Toolchain: Xcode Command Line Tools, Python 3.12 via Homebrew.
+
 ```bash
+# Plugin
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -DAE_SDK_PATH=/path/to/ae_sdk
 cmake --build build
-```
 
-### Runtime (Python)
-```bash
+# Runtime
 cd runtime
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[mlx,dev]"
+
+# Symlink the plugin into AE for live development
+sudo ln -s $(pwd)/../build/plugin/CorridorKey.plugin \
+  "/Applications/Adobe After Effects 2026/Plug-ins/Effects/CorridorKey.plugin"
 ```
 
-### Development Setup
-```bash
-# Symlink plugin into AE for live development
-sudo ln -s $(pwd)/build/plugin/CorridorKey.plugin \
-  "/Applications/Adobe After Effects 2026/Plug-ins/Effects/CorridorKey.plugin"
+### Windows (x64)
 
-# Run tests
-cd runtime && source .venv/bin/activate && python -m pytest tests/ -v
+Toolchain: Visual Studio Build Tools 2019 or 2022 with the **Desktop development
+with C++** workload, plus standalone CMake (or the one bundled with VS).
+Extract the AE Windows SDK with the bundled `extractzstd.bat`.
+
+```powershell
+# Plugin — use the VS generator that matches your installed Build Tools.
+# Pass the Examples folder of the unpacked SDK as AE_SDK_PATH.
+cmake -B build_win -S . -G "Visual Studio 16 2019" -A x64 `
+      -DAE_SDK_PATH="C:\path\to\AfterEffectsSDK\Examples"
+cmake --build build_win --config Release
+
+# Runtime — minimal deps (no MLX on Windows yet)
+cd runtime
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install msgpack numpy Pillow opencv-python-headless
+
+# Install the .aex into AE's plug-ins folder (admin shell required —
+# Program Files is protected). Close AE first; the file is locked while open.
+Copy-Item -Force .\build_win\plugin\Release\CorridorKey.aex `
+  "C:\Program Files\Adobe\Adobe After Effects 2026\Support Files\Plug-ins\Effects\CorridorKey.aex"
+
+# Tell the bridge where the runtime venv lives. Required on Windows because
+# the .aex sits in Program Files with no path-relationship to the source repo.
+[Environment]::SetEnvironmentVariable('CORRIDORKEY_REPO_ROOT', 'C:\path\to\corridorkey-ae', 'User')
+```
+
+Then launch After Effects fresh (env vars are inherited at process start).
+The plugin appears under **Effect → Keying → CorridorKey**, auto-launches
+the runtime on first render, and renders the "no model" fallback overlay.
+
+### Tests
+
+```bash
+cd runtime && python -m pytest tests/ -v
 ```
 
 ## Project Structure
@@ -124,7 +163,9 @@ corridorkey-ae/
 
 See [open issues](https://github.com/iamjoshuadavies/corridorkey-ae/issues) for the full backlog. Key items:
 
-- [ ] **Windows support** (M4) — CUDA/PyTorch backend, .aex build
+- [ ] **Windows inference engine** — PyTorch/CUDA backend (the EZ-CorridorKey
+      Windows app ships a `.pth` we can target). Plugin + runtime IPC already
+      work on Windows; only the engine is missing.
 - [ ] **Parallel MFR inference** (#12) — connection pool for multi-threaded rendering
 - [ ] **Float32 pipeline** (#10) — skip uint8 quantization for 32bpc projects
 - [ ] **Async render** (#6) — non-blocking inference for smoother UI

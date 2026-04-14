@@ -6,8 +6,10 @@ Three-layer architecture: Host Plugin (C++) → Bridge (IPC) → Runtime (Python
 Created by Niko Pueringer / Corridor Digital. AE plugin wrapper by this project.
 
 ## Build Commands
+
+### macOS
 ```bash
-# Configure and build plugin (macOS) — must specify SDK path
+# Configure and build plugin — must specify SDK path
 cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -DAE_SDK_PATH=/Users/schwar/Documents/corridorkey-ae/ae_sdk
 cmake --build build
 
@@ -24,6 +26,39 @@ scripts/bootstrap/run_tests.sh
 cd runtime && source .venv/bin/activate && python -m server.main --port 12345
 ```
 
+### Windows
+```bash
+# Configure with VS 2019 generator (matches BuildTools 2019 on this machine).
+# AE_SDK_PATH points at the Examples folder of the unpacked Win SDK; CMake
+# also auto-detects a nested ae_sdk_win/<zip>/<zstd>/Examples layout if you
+# don't pass it explicitly.
+cmake -B build_win -S . -G "Visual Studio 16 2019" -A x64 \
+      -DAE_SDK_PATH="C:/Users/iamjo/Documents/corridorkey-ae/ae_sdk_win/AfterEffectsSDK_25.6_61_win/ae25.6_61.64bit.AfterEffectsSDK/Examples"
+cmake --build build_win --config Release
+
+# Install the .aex into AE's plug-ins folder. Program Files needs admin —
+# run this from an elevated PowerShell with AE closed (the file is locked
+# while AE is open).
+Copy-Item -Force "build_win/plugin/Release/CorridorKey.aex" \
+  "C:/Program Files/Adobe/Adobe After Effects 2026/Support Files/Plug-ins/Effects/CorridorKey.aex"
+
+# Set the env var that lets the bridge find the runtime venv (because the
+# .aex sits in Program Files with no relationship to the source repo).
+[Environment]::SetEnvironmentVariable('CORRIDORKEY_REPO_ROOT', 'C:\Users\iamjo\Documents\corridorkey-ae', 'User')
+
+# Runtime venv (no MLX on Windows yet — minimal deps for fallback overlay)
+cd runtime
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install msgpack numpy Pillow opencv-python-headless
+
+# Start runtime manually
+.\.venv\Scripts\python.exe -m server.main --port 12345
+```
+
+Claude's bash session is not elevated even when Claude Desktop is launched
+as admin (sandbox runs at medium integrity). The `Copy-Item` step into
+Program Files must be run by the user from an admin shell.
+
 ## Architecture
 - `plugin/` — C++ AE effect plugin (CMake build, Drawbot UI, Smart Render)
 - `runtime/` — Python inference service (corridorkey_mlx, tiled inference)
@@ -37,6 +72,13 @@ Length-prefixed binary messages over TCP (127.0.0.1, auto-assigned port).
 - Binary FRAME messages: `"FRAME"` magic + dimensions + params + pixel data + optional alpha hint
 - Response: `"FRAME"` magic + dimensions + processed pixel data
 - All pixel data is ARGB 8bpc (converted from/to project bit depth in C++)
+
+### Port handoff
+The runtime writes `<pid> <port>\n` to `<temp>/corridorkey_runtime.port`
+after binding. The C++ bridge polls that file to discover the port. macOS
+also still parses `PORT:<n>` from the child's stdout pipe as a fallback
+(the file is the primary mechanism on Windows because the Python venv
+launcher chain swallows stdout before it reaches the parent's pipe).
 
 ### Inference Pipeline
 - Model: CorridorKey via `corridorkey_mlx` package (pip from GitHub)
@@ -58,7 +100,8 @@ Length-prefixed binary messages over TCP (127.0.0.1, auto-assigned port).
 ## Current Features
 - Smart Render: 8bpc, 16bpc, 32bpc float
 - Multi-Frame Rendering (threaded, serialized via mutex)
-- Auto-launch runtime subprocess (fork/exec, PORT discovery from stdout)
+- Auto-launch runtime subprocess (fork/exec on macOS, CreateProcessW on
+  Windows; port discovery via temp file, with stdout pipe as macOS fallback)
 - Reconnect with exponential backoff cooldown
 - Zombie process cleanup on re-launch
 - Custom Drawbot UI: logo, title, tagline, clickable About link
@@ -113,6 +156,60 @@ Rebuilds auto-update. Restart AE to pick up changes.
 /Library/Logs/DiagnosticReports/After Effects_*.diag   # crashes
 /Library/Logs/DiagnosticReports/After Effects_*.hang   # hangs/deadlocks
 ```
+
+## Windows-specific debugging
+
+### Plugin loading log
+```
+%AppData%\Adobe\After Effects\26.0\Plugin Loading.log
+```
+Same error catalogue as macOS. Two latent PiPL bugs in the original `.r`
+file silently passed AE on macOS but were rejected by Windows AE: the
+`out_flags` literal had unrelated bits set (`0x04008040` instead of
+`0x02008400`), and the `AE_Effect_Version` literal didn't match what
+`PF_VERSION(0,1,0,DEVELOP,0)` produces (`32768`, not `65536`). Both are
+fixed in `CorridorKeyAEPiPL.r` — keep them in sync if you bump the version.
+
+### Runtime log
+The runtime writes a fresh log each launch to:
+```
+%TEMP%\corridorkey_runtime.log
+```
+This is the only way to see runtime output when the bridge auto-launches
+it — `CreateProcessW` runs the runtime with `CREATE_NO_WINDOW` and no
+attached console, so stdout/stderr are not visible.
+
+### Port handoff file
+```
+%TEMP%\corridorkey_runtime.port
+```
+Contents: `<pid> <port>\n`. Stale files are wiped by the bridge before
+each `LaunchRuntime` call.
+
+### Socket timeouts gotcha
+Windows `setsockopt(SO_RCVTIMEO/SO_SNDTIMEO)` takes a `DWORD` of
+**milliseconds**, not a POSIX `struct timeval`. Passing `tv_sec=30,
+tv_usec=0` causes Windows to read the first 4 bytes as a DWORD = 30,
+producing a 30-millisecond timeout. The bridge has a `SetSocketTimeoutMs`
+helper that does the right thing on each platform — use it, never call
+`setsockopt` for these directly.
+
+### Plugin install path
+```
+C:\Program Files\Adobe\Adobe After Effects 2026\Support Files\Plug-ins\Effects\CorridorKey.aex
+```
+Writing to Program Files needs an elevated shell. Symlinks would need
+Developer Mode or admin too, so dev workflow is build → manual `Copy-Item`
+→ restart AE.
+
+### Build system gotchas
+- VS 2019 16.11 BuildTools is what's installed and registered (`vswhere`
+  doesn't see the partial 2022 install in `C:\Program Files (x86)\...\2022`).
+  Use `-G "Visual Studio 16 2019"`. C++17 works fine in 14.29.
+- The Windows PiPL pipeline is `cl /EP` → `PiPLtool.exe` → `cl /EP`,
+  emitting `CorridorKeyAEPiPL_temp.rc` into the build dir. The tracked
+  `plugin/resources/CorridorKeyAE.rc` is just `#include` of that — the
+  build dir is added to the rc.exe include path so it resolves.
 
 ## Licensing
 PolyForm Noncommercial 1.0.0 — source-available, free for non-commercial use.

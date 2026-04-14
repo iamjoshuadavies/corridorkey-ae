@@ -9,6 +9,8 @@ import argparse
 import logging
 import signal
 import sys
+import tempfile
+from pathlib import Path
 from typing import Optional
 
 from engines.base import InferenceEngine
@@ -58,10 +60,18 @@ def main() -> None:
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
 
+    # Log to both stderr (visible when run by hand) and a temp-file
+    # (only way to see logs when the bridge launches us with no console).
+    log_path = Path(tempfile.gettempdir()) / "corridorkey_runtime.log"
     logging.basicConfig(
         level=getattr(logging, args.log_level),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=[
+            logging.FileHandler(str(log_path), mode="w", encoding="utf-8"),
+            logging.StreamHandler(sys.stderr),
+        ],
     )
+    logging.getLogger("corridorkey").info("Logging to %s", log_path)
 
     # Detect hardware on startup
     hw_info = detect_hardware()

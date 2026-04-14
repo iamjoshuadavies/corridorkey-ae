@@ -26,6 +26,37 @@ from server.hardware import detect_hardware
 logger = logging.getLogger("corridorkey.handler")
 
 # =============================================================================
+# Cross-platform truetype font lookup for the fallback overlay
+# =============================================================================
+# PIL's load_default() returns a 10px bitmap font that doesn't scale, which
+# looks unreadable on full-resolution frames. Try platform-appropriate
+# truetype fonts so the text scales with the requested size.
+
+_FALLBACK_FONT_PATHS = [
+    # Windows
+    r"C:\Windows\Fonts\arial.ttf",
+    r"C:\Windows\Fonts\segoeui.ttf",
+    r"C:\Windows\Fonts\calibri.ttf",
+    # macOS
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/System/Library/Fonts/HelveticaNeue.ttc",
+    "/Library/Fonts/Arial.ttf",
+    # Linux
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+]
+
+
+def _load_fallback_font(size: int) -> ImageFont.ImageFont:
+    """Find a truetype font and load at the requested size; bitmap fallback."""
+    for path in _FALLBACK_FONT_PATHS:
+        try:
+            return ImageFont.truetype(path, size=size)
+        except (IOError, OSError):
+            continue
+    return ImageFont.load_default()
+
+# =============================================================================
 # Frame cache — avoids re-processing identical frames
 # =============================================================================
 
@@ -439,20 +470,25 @@ class RequestHandler:
             rgba[:, :, 3] = img_array[:, :, 0]
 
             img = Image.fromarray(rgba, "RGBA")
-            draw = ImageDraw.Draw(img)
 
-            bar_height = max(50, height // 10)
+            # Size everything as a fraction of frame height so the visual
+            # result stays the same whether AE is rendering full-res or
+            # downsampled (AE upscales the rendered output to fit the viewer).
+            font_size  = max(14, height // 18)
+            bar_height = max(40, int(font_size * 2.6))
+            pad_x      = max(8, font_size // 2)
+            pad_y      = max(4, font_size // 4)
+            line_gap   = max(2, font_size // 5)
+
             overlay = Image.new("RGBA", (width, bar_height), (0, 80, 0, 200))
             img.paste(overlay, (0, 0), overlay)
-
             draw = ImageDraw.Draw(img)
-            try:
-                font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", size=max(20, height // 20))
-            except (IOError, OSError):
-                font = ImageFont.load_default()
 
-            draw.text((10, 5), "CORRIDORKEY IPC OK  (NO MODEL)", fill=(255, 200, 0, 255), font=font)
-            draw.text((10, bar_height // 2 + 2),
+            font = _load_fallback_font(font_size)
+            draw.text((pad_x, pad_y),
+                      "CORRIDORKEY IPC OK  (NO MODEL)",
+                      fill=(255, 200, 0, 255), font=font)
+            draw.text((pad_x, pad_y + font_size + line_gap),
                       f"Frame #{self._frame_count}  |  Model not loaded",
                       fill=(200, 255, 200, 255), font=font)
 
