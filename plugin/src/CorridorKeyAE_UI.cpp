@@ -94,9 +94,15 @@ static PF_Err DrawEvent(
         &logo_ref
     );
 
+    // Logo top aligns with the title text top. Drawbot's DrawString uses
+    // the BASELINE as the y-origin, so the top of the title text is roughly
+    // title_y minus the font ascent (~13 px for default_size * 1.35 with
+    // the standard AE UI font).
+    float title_y = cy + 16.0f;
+    float logo_y  = cy + 4.0f;   // title_y - ~title_ascent
+
     if (logo_ref) {
         float logo_x = cx + 10.0f;
-        float logo_y = cy + 10.0f;
         DRAWBOT_PointF32 logo_origin = {logo_x, logo_y};
         suites.surface_suiteP->DrawImage(surface, logo_ref, &logo_origin, 1.0f);
         suites.supplier_suiteP->ReleaseObject(reinterpret_cast<DRAWBOT_ObjectRef>(logo_ref));
@@ -104,12 +110,11 @@ static PF_Err DrawEvent(
 
     // --- Draw "CorridorKey" title ---
     float text_x = cx + 10.0f + 38.0f + 10.0f;  // After logo + padding
-    float title_y = cy + 16.0f;  // More room for ascenders
 
     DRAWBOT_FontRef title_font = nullptr;
     float default_size = 0;
     suites.supplier_suiteP->GetDefaultFontSize(supplier, &default_size);
-    suites.supplier_suiteP->NewDefaultFont(supplier, default_size * 1.6f, &title_font);
+    suites.supplier_suiteP->NewDefaultFont(supplier, default_size * 1.35f, &title_font);
 
     DRAWBOT_ColorRGBA title_color = {0.95f, 0.95f, 0.95f, 1.0f};
     DRAWBOT_BrushRef title_brush = nullptr;
@@ -117,10 +122,20 @@ static PF_Err DrawEvent(
 
     DRAWBOT_UTF16Char title_text[64];
     AsciiToUTF16("CorridorKey", title_text, 64);
+    // Fake-bold: draw the string twice with a tiny horizontal offset so
+    // the strokes overlap and thicken. Drawbot's NewDefaultFont has no
+    // weight selector, so this is the standard Drawbot workaround.
     DRAWBOT_PointF32 title_origin = {text_x, title_y};
     suites.surface_suiteP->DrawString(
         surface, title_brush, title_font,
         title_text, &title_origin,
+        kDRAWBOT_TextAlignment_Left,
+        kDRAWBOT_TextTruncation_None, 0.0f
+    );
+    DRAWBOT_PointF32 title_origin_bold = {text_x + 0.6f, title_y};
+    suites.surface_suiteP->DrawString(
+        surface, title_brush, title_font,
+        title_text, &title_origin_bold,
         kDRAWBOT_TextAlignment_Left,
         kDRAWBOT_TextTruncation_None, 0.0f
     );
@@ -131,7 +146,7 @@ static PF_Err DrawEvent(
         suites.supplier_suiteP->ReleaseObject(reinterpret_cast<DRAWBOT_ObjectRef>(title_font));
 
     // --- Draw tagline ---
-    float tagline_y = title_y + default_size * 1.8f;
+    float tagline_y = title_y + default_size * 1.1f;
 
     DRAWBOT_FontRef tag_font = nullptr;
     suites.supplier_suiteP->NewDefaultFont(supplier, default_size * 0.85f, &tag_font);
@@ -151,7 +166,7 @@ static PF_Err DrawEvent(
     );
 
     // --- Draw "About" link ---
-    float about_y = tagline_y + default_size * 1.3f;
+    float about_y = tagline_y + default_size * 1.0f;
 
     DRAWBOT_ColorRGBA about_color = {0.4f, 0.6f, 1.0f, 1.0f}; // Blue link color
     DRAWBOT_BrushRef about_brush = nullptr;
@@ -186,8 +201,9 @@ static PF_Err DrawEvent(
         suites.supplier_suiteP->ReleaseObject(reinterpret_cast<DRAWBOT_ObjectRef>(underline_path));
     }
 
-    // --- Draw status line ---
-    float status_y = about_y + default_size * 1.2f;
+    // --- Draw status line (same row as About, to the right of its underline) ---
+    float status_y = about_y;
+    float status_x = text_x + 28.0f + 12.0f;  // After "About" + underline + gap
 
     DRAWBOT_ColorRGBA status_color;
     if (g_status.bridge_connected) {
@@ -204,11 +220,12 @@ static PF_Err DrawEvent(
     suites.supplier_suiteP->NewBrush(supplier, &status_color, &status_brush);
 
     DRAWBOT_FontRef status_font = nullptr;
-    suites.supplier_suiteP->NewDefaultFont(supplier, default_size * 0.7f, &status_font);
+    // Match the tagline/About size so they sit cleanly on the same baseline.
+    suites.supplier_suiteP->NewDefaultFont(supplier, default_size * 0.85f, &status_font);
 
     DRAWBOT_UTF16Char status_text[128];
     AsciiToUTF16(g_status.status_text, status_text, 128);
-    DRAWBOT_PointF32 status_origin = {cx + 10.0f, status_y};
+    DRAWBOT_PointF32 status_origin = {status_x, status_y};
     suites.surface_suiteP->DrawString(
         surface, status_brush, status_font,
         status_text, &status_origin,
