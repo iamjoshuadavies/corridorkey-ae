@@ -11,16 +11,16 @@ import signal
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 from engines.base import InferenceEngine
-from server.ipc import IPCServer
+
 from server.hardware import detect_hardware
+from server.ipc import IPCServer
 
 logger = logging.getLogger("corridorkey.runtime")
 
 
-def create_engine(model_path: Optional[str] = None, tile_size: int = 512) -> Optional[InferenceEngine]:
+def create_engine(model_path: str | None = None, tile_size: int = 512) -> InferenceEngine | None:
     """Create and load the best available inference engine.
 
     Order of preference:
@@ -77,8 +77,14 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=0, help="TCP port (0 = auto-assign)")
     parser.add_argument("--socket", type=str, default=None, help="Unix domain socket path")
     parser.add_argument("--model", type=str, default=None, help="Path to model weights")
-    parser.add_argument("--tile-size", type=int, default=512, help="Tile size for tiled inference (512=default, larger=more VRAM)")
-    parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    parser.add_argument(
+        "--tile-size", type=int, default=512,
+        help="Tile size for tiled inference (512=default, larger=more VRAM)",
+    )
+    parser.add_argument(
+        "--log-level", default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+    )
     args = parser.parse_args()
 
     # Log to both stderr (visible when run by hand) and a temp-file

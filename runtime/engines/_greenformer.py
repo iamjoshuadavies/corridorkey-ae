@@ -25,12 +25,11 @@ from __future__ import annotations
 
 import math
 from collections import OrderedDict
-from typing import Optional
 
 import timm
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+import torch.nn as nn  # noqa: N812  (PyTorch convention)
+import torch.nn.functional as F  # noqa: N812  (PyTorch convention)
 
 # Architecture constants (must match the trained checkpoint)
 HIERA_MODEL_NAME = "hiera_base_plus_224.mae_in1k_ft_in1k"
@@ -186,7 +185,7 @@ class GreenFormer(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        refiner_scale: Optional[torch.Tensor] = None,
+        refiner_scale: torch.Tensor | None = None,
         skip_refiner: bool = False,
     ) -> dict[str, torch.Tensor]:
         input_size = x.shape[2:]

@@ -15,12 +15,12 @@ import logging
 import struct
 import time
 from collections import OrderedDict
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
+from engines.base import InferenceEngine, InferenceRequest
 from PIL import Image, ImageDraw, ImageFont
 
-from engines.base import InferenceEngine, InferenceRequest
 from server.hardware import detect_hardware
 
 logger = logging.getLogger("corridorkey.handler")
@@ -52,7 +52,7 @@ def _load_fallback_font(size: int) -> ImageFont.ImageFont:
     for path in _FALLBACK_FONT_PATHS:
         try:
             return ImageFont.truetype(path, size=size)
-        except (IOError, OSError):
+        except OSError:
             continue
     return ImageFont.load_default()
 
@@ -75,7 +75,7 @@ class FrameCache:
         self, width: int, height: int, pixel_hash: str,
         output_mode: int, despill: float, despeckle: float,
         refiner: float, matte_cleanup: float,
-        hint_hash: Optional[str] = None,
+        hint_hash: str | None = None,
         quality_mode: int = 0,
     ) -> str:
         """Build a cache key from frame dimensions, content hash, and ALL params."""
@@ -102,9 +102,9 @@ class FrameCache:
         self, width: int, height: int, pixel_hash: str,
         output_mode: int, despill: float, despeckle: float,
         refiner: float, matte_cleanup: float,
-        hint_hash: Optional[str] = None,
+        hint_hash: str | None = None,
         quality_mode: int = 0,
-    ) -> Optional[bytes]:
+    ) -> bytes | None:
         key = self._make_key(
             width, height, pixel_hash, output_mode,
             despill, despeckle, refiner, matte_cleanup, hint_hash,
@@ -122,7 +122,7 @@ class FrameCache:
         output_mode: int, despill: float, despeckle: float,
         refiner: float, matte_cleanup: float,
         response: bytes,
-        hint_hash: Optional[str] = None,
+        hint_hash: str | None = None,
         quality_mode: int = 0,
     ) -> None:
         key = self._make_key(
@@ -166,7 +166,7 @@ FRAME_HEADER_SIZE_LEGACY = 5 + 4 + 4 + 4  # 17 bytes
 class RequestHandler:
     """Dispatches incoming messages from the AE plugin."""
 
-    def __init__(self, engine: Optional[InferenceEngine] = None) -> None:
+    def __init__(self, engine: InferenceEngine | None = None) -> None:
         self._hw_info = detect_hardware()
         self._frame_count = 0
         self._engine = engine
@@ -233,7 +233,7 @@ class RequestHandler:
         height = struct.unpack(">I", data[9:13])[0]
         rowbytes = struct.unpack(">I", data[13:17])[0]
 
-        hint_data: Optional[bytes] = None
+        hint_data: bytes | None = None
         hint_width = 0
         hint_height = 0
         hint_rowbytes = 0
@@ -331,7 +331,7 @@ class RequestHandler:
         self, width: int, height: int, rowbytes: int, pixel_data: bytes,
         output_mode: int, despill: float, despeckle: float,
         refiner: float, matte_cleanup: float,
-        hint_data: Optional[bytes] = None,
+        hint_data: bytes | None = None,
         hint_width: int = 0, hint_height: int = 0, hint_rowbytes: int = 0,
         quality_mode: int = 0,
     ) -> bytes:
@@ -358,20 +358,24 @@ class RequestHandler:
                 from PIL import Image as _PILImg
                 # ARGB → RGBA for PIL
                 rgba = np.zeros_like(argb)
-                rgba[:, :, 0] = argb[:, :, 1]; rgba[:, :, 1] = argb[:, :, 2]
-                rgba[:, :, 2] = argb[:, :, 3]; rgba[:, :, 3] = argb[:, :, 0]
+                rgba[:, :, 0] = argb[:, :, 1]  # R
+                rgba[:, :, 1] = argb[:, :, 2]  # G
+                rgba[:, :, 2] = argb[:, :, 3]  # B
+                rgba[:, :, 3] = argb[:, :, 0]  # A
                 pil_img = _PILImg.fromarray(rgba, "RGBA").resize(
                     (new_w, new_h), _PILImg.Resampling.BILINEAR)
                 rgba_small = np.array(pil_img)
                 # RGBA → ARGB
                 argb = np.zeros((new_h, new_w, 4), dtype=np.uint8)
-                argb[:, :, 0] = rgba_small[:, :, 3]; argb[:, :, 1] = rgba_small[:, :, 0]
-                argb[:, :, 2] = rgba_small[:, :, 1]; argb[:, :, 3] = rgba_small[:, :, 2]
+                argb[:, :, 0] = rgba_small[:, :, 3]  # A
+                argb[:, :, 1] = rgba_small[:, :, 0]  # R
+                argb[:, :, 2] = rgba_small[:, :, 1]  # G
+                argb[:, :, 3] = rgba_small[:, :, 2]  # B
                 logger.info("Downscaled %dx%d → %dx%d (quality mode %d)",
                              original_w, original_h, new_w, new_h, quality_mode)
 
             # Parse alpha hint if provided
-            alpha_hint_image: Optional[np.ndarray] = None
+            alpha_hint_image: np.ndarray | None = None
             if hint_data is not None and len(hint_data) > 0:
                 hint_raw = np.frombuffer(hint_data, dtype=np.uint8).copy()
                 if hint_rowbytes == hint_width * 4:
@@ -384,7 +388,9 @@ class RequestHandler:
                 hint_r = hint_argb[:, :, 1].astype(np.float32)
                 hint_g = hint_argb[:, :, 2].astype(np.float32)
                 hint_b = hint_argb[:, :, 3].astype(np.float32)
-                alpha_hint_image = ((hint_r * 0.299 + hint_g * 0.587 + hint_b * 0.114)).astype(np.uint8)
+                alpha_hint_image = (
+                    hint_r * 0.299 + hint_g * 0.587 + hint_b * 0.114
+                ).astype(np.uint8)
                 # Resize hint to match the (possibly downscaled) input.
                 # Use argb's actual shape, not the original (width, height) —
                 # those are stale if a quality-mode downscale happened above.
@@ -426,19 +432,27 @@ class RequestHandler:
 
             # Upscale result back to original size if we downscaled
             output_argb = result.image
-            if target_size and (original_w != output_argb.shape[1] or original_h != output_argb.shape[0]):
+            needs_upscale = target_size and (
+                original_w != output_argb.shape[1]
+                or original_h != output_argb.shape[0]
+            )
+            if needs_upscale:
                 from PIL import Image as _PILImg
                 # ARGB → RGBA for PIL
                 out_rgba = np.zeros_like(output_argb)
-                out_rgba[:, :, 0] = output_argb[:, :, 1]; out_rgba[:, :, 1] = output_argb[:, :, 2]
-                out_rgba[:, :, 2] = output_argb[:, :, 3]; out_rgba[:, :, 3] = output_argb[:, :, 0]
+                out_rgba[:, :, 0] = output_argb[:, :, 1]  # R
+                out_rgba[:, :, 1] = output_argb[:, :, 2]  # G
+                out_rgba[:, :, 2] = output_argb[:, :, 3]  # B
+                out_rgba[:, :, 3] = output_argb[:, :, 0]  # A
                 pil_out = _PILImg.fromarray(out_rgba, "RGBA").resize(
                     (original_w, original_h), _PILImg.Resampling.BILINEAR)
                 out_rgba = np.array(pil_out)
                 # RGBA → ARGB
                 output_argb = np.zeros((original_h, original_w, 4), dtype=np.uint8)
-                output_argb[:, :, 0] = out_rgba[:, :, 3]; output_argb[:, :, 1] = out_rgba[:, :, 0]
-                output_argb[:, :, 2] = out_rgba[:, :, 1]; output_argb[:, :, 3] = out_rgba[:, :, 2]
+                output_argb[:, :, 0] = out_rgba[:, :, 3]  # A
+                output_argb[:, :, 1] = out_rgba[:, :, 0]  # R
+                output_argb[:, :, 2] = out_rgba[:, :, 1]  # G
+                output_argb[:, :, 3] = out_rgba[:, :, 2]  # B
 
             # Convert output (H, W, 4) ARGB back to padded pixel data
             out_w, out_h = output_argb.shape[1], output_argb.shape[0]

@@ -9,10 +9,8 @@ import logging
 import os
 import platform
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
-from numpy.typing import NDArray
 
 from engines.base import InferenceEngine, InferenceRequest, InferenceResult
 
@@ -28,7 +26,7 @@ WEIGHT_CACHE_DIR = (
 WEIGHT_FILENAME = "corridorkey_mlx.safetensors"
 
 
-def find_model_weights() -> Optional[Path]:
+def find_model_weights() -> Path | None:
     """Return the cached weight path, downloading on first run if needed."""
     cached = WEIGHT_CACHE_DIR / WEIGHT_FILENAME
     if cached.exists():
@@ -38,7 +36,7 @@ def find_model_weights() -> Optional[Path]:
     return download_model_weights()
 
 
-def download_model_weights() -> Optional[Path]:
+def download_model_weights() -> Path | None:
     """Download MLX weights from the upstream corridorkey-mlx GitHub release."""
     try:
         from corridorkey_mlx.weights import download_weights
@@ -75,17 +73,17 @@ class MLXEngine(InferenceEngine):
         use_refiner: bool = True,
     ) -> None:
         self._engine = None
-        self._model_path: Optional[str] = None
+        self._model_path: str | None = None
         self._tile_size = tile_size
         self._overlap = overlap
         self._use_refiner = use_refiner
-        self._current_mode_tiled: Optional[bool] = None  # Track current mode
+        self._current_mode_tiled: bool | None = None  # Track current mode
 
         # Raw model output cache: avoids re-running inference when only
         # post-processing params change. Keyed by (pixel_hash, refiner, tiled).
-        self._raw_cache_key: Optional[str] = None
-        self._raw_cache_alpha: Optional[np.ndarray] = None
-        self._raw_cache_fg: Optional[np.ndarray] = None
+        self._raw_cache_key: str | None = None
+        self._raw_cache_alpha: np.ndarray | None = None
+        self._raw_cache_fg: np.ndarray | None = None
 
     def load_model(self, model_path: str) -> None:
         """Load the CorridorKey MLX model in tiled mode (default)."""
@@ -160,7 +158,10 @@ class MLXEngine(InferenceEngine):
             import hashlib
             alpha_hint = getattr(request, '_alpha_hint', None)
             pix_md5 = hashlib.md5(rgb.tobytes()).hexdigest()
-            hint_md5 = hashlib.md5(alpha_hint.tobytes()).hexdigest() if alpha_hint is not None else "none"
+            hint_md5 = (
+                hashlib.md5(alpha_hint.tobytes()).hexdigest()
+                if alpha_hint is not None else "none"
+            )
             raw_key = (
                 f"{pix_md5}:{hint_md5}:{request.refiner:.3f}:{use_tiled}:{h}:{w}"
             )
@@ -169,13 +170,16 @@ class MLXEngine(InferenceEngine):
             if raw_key == self._raw_cache_key and self._raw_cache_alpha is not None:
                 alpha = self._raw_cache_alpha.copy()
                 fg = self._raw_cache_fg.copy()
-                logger.info("Raw model cache HIT — skipping inference, applying post-processing only")
+                logger.info("Raw model cache HIT — applying post-processing only")
             else:
                 # Alpha hint (already fetched above for cache key)
                 if alpha_hint is None:
                     alpha_hint = np.full((h, w), 255, dtype=np.uint8)
                 else:
-                    logger.info("Using external alpha hint (%dx%d)", alpha_hint.shape[1], alpha_hint.shape[0])
+                    logger.info(
+                        "Using external alpha hint (%dx%d)",
+                        alpha_hint.shape[1], alpha_hint.shape[0],
+                    )
 
                 # Run inference
                 result = self._engine.process_frame(

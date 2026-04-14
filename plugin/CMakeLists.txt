@@ -115,6 +115,10 @@ elseif(WIN32)
         _WINDOWS
         WIN32
         MSWindows
+        # Silence MSVC nags about fopen/fscanf/getenv and inet_addr.
+        # We use them deliberately and the POSIX variants are standard C.
+        _CRT_SECURE_NO_WARNINGS
+        _WINSOCK_DEPRECATED_NO_WARNINGS
     )
 endif()
 

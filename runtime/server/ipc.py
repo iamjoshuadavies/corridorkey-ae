@@ -18,7 +18,6 @@ import socket
 import struct
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 from server.handler import RequestHandler
 
@@ -42,13 +41,13 @@ MAX_MESSAGE_SIZE = 256 * 1024 * 1024  # 256 MB (large frames)
 class IPCServer:
     """Local IPC server for the AE plugin bridge."""
 
-    def __init__(self, port: int = 0, socket_path: Optional[str] = None) -> None:
+    def __init__(self, port: int = 0, socket_path: str | None = None) -> None:
         self.port = port
         self.socket_path = socket_path
         self._running = False
-        self._server_socket: Optional[socket.socket] = None
+        self._server_socket: socket.socket | None = None
         self._handler = RequestHandler()
-        self._port_file: Optional[Path] = None
+        self._port_file: Path | None = None
 
     def _write_port_file(self, port: int) -> None:
         """Write `<pid> <port>` to the well-known port file. Best-effort."""
@@ -96,7 +95,7 @@ class IPCServer:
                 self._server_socket.settimeout(1.0)
                 try:
                     conn, addr = self._server_socket.accept()
-                except socket.timeout:
+                except TimeoutError:
                     continue
                 logger.info("Client connected: %s", addr)
                 self._handle_connection(conn)
@@ -128,13 +127,13 @@ class IPCServer:
                 except (ConnectionResetError, BrokenPipeError):
                     logger.info("Client disconnected")
                     break
-                except socket.timeout:
+                except TimeoutError:
                     continue
                 except Exception:
                     logger.exception("Error handling message")
                     break
 
-    def _recv_raw(self, conn: socket.socket) -> Optional[bytes]:
+    def _recv_raw(self, conn: socket.socket) -> bytes | None:
         """Receive a length-prefixed raw message."""
         header = self._recv_exact(conn, HEADER_SIZE)
         if not header:
@@ -151,7 +150,7 @@ class IPCServer:
         conn.sendall(header + data)
 
     @staticmethod
-    def _recv_exact(conn: socket.socket, size: int) -> Optional[bytes]:
+    def _recv_exact(conn: socket.socket, size: int) -> bytes | None:
         """Receive exactly `size` bytes from the socket."""
         chunks: list[bytes] = []
         received = 0

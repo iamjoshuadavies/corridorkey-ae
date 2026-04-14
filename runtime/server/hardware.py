@@ -5,7 +5,7 @@ Hardware detection — identifies GPU, VRAM, and compute capabilities.
 import logging
 import platform
 import subprocess
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from typing import Any
 
 logger = logging.getLogger("corridorkey.hardware")
@@ -39,14 +39,12 @@ def detect_hardware() -> dict[str, Any]:
         import torch
 
         if torch.cuda.is_available():
+            props = torch.cuda.get_device_properties(0)
             info.device_name = torch.cuda.get_device_name(0)
             info.device_type = "cuda"
-            info.vram_total_mb = int(torch.cuda.get_device_properties(0).total_memory / (1024 * 1024))
+            info.vram_total_mb = int(props.total_memory / (1024 * 1024))
             info.vram_used_mb = int(torch.cuda.memory_allocated(0) / (1024 * 1024))
-            info.compute_capability = (
-                f"{torch.cuda.get_device_properties(0).major}"
-                f".{torch.cuda.get_device_properties(0).minor}"
-            )
+            info.compute_capability = f"{props.major}.{props.minor}"
             logger.info("CUDA device detected: %s", info)
             return info.to_dict()
 
@@ -63,7 +61,7 @@ def detect_hardware() -> dict[str, Any]:
 
     # Try MLX (Apple Silicon)
     try:
-        import mlx.core as mx
+        import mlx.core  # noqa: F401  # availability probe only
 
         info.device_name = _get_apple_gpu_name()
         info.device_type = "mlx"

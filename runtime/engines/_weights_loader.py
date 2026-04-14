@@ -34,7 +34,6 @@ import logging
 import os
 import urllib.request
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger("corridorkey.engines.weights")
 
@@ -61,7 +60,7 @@ CORRIDORKEY_MLX_RELEASE_URL = (
 EXPECTED_SAFETENSORS_NAME = "corridorkey_mlx.safetensors"
 
 
-def _download_mlx_safetensors(dest: Path) -> Optional[Path]:
+def _download_mlx_safetensors(dest: Path) -> Path | None:
     """Download the official MLX safetensors release. ~398 MB."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
@@ -172,7 +171,7 @@ def _load_pytorch_pth(path: Path) -> dict:
 
 def find_or_download_weights(
     allow_download: bool = True,
-) -> Optional[tuple[Path, str]]:
+) -> tuple[Path, str] | None:
     """Locate weights on disk, downloading if necessary.
 
     Returns:

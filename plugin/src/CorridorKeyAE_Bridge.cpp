@@ -75,13 +75,20 @@ static void WriteU32BE(uint8_t* p, uint32_t v) {
     p[3] = v & 0xFF;
 }
 
+// Maximum send()/recv() chunk size. Windows send/recv take `int`, so we
+// loop in 1 MB chunks — large enough to be efficient, small enough to
+// stay well under INT_MAX and avoid C4267 truncation warnings.
+static constexpr size_t kSocketChunkMax = 1 * 1024 * 1024;
+
 static bool SendAll(socket_t sock, const void* data, size_t len) {
     const char* p = reinterpret_cast<const char*>(data);
     size_t sent = 0;
     while (sent < len) {
-        auto n = send(sock, p + sent, len - sent, 0);
+        size_t remaining = len - sent;
+        int chunk = static_cast<int>(remaining > kSocketChunkMax ? kSocketChunkMax : remaining);
+        auto n = send(sock, p + sent, chunk, 0);
         if (n <= 0) return false;
-        sent += n;
+        sent += static_cast<size_t>(n);
     }
     return true;
 }
@@ -90,9 +97,11 @@ static bool RecvAll(socket_t sock, void* data, size_t len) {
     char* p = reinterpret_cast<char*>(data);
     size_t received = 0;
     while (received < len) {
-        auto n = recv(sock, p + received, len - received, 0);
+        size_t remaining = len - received;
+        int chunk = static_cast<int>(remaining > kSocketChunkMax ? kSocketChunkMax : remaining);
+        auto n = recv(sock, p + received, chunk, 0);
         if (n <= 0) return false;
-        received += n;
+        received += static_cast<size_t>(n);
     }
     return true;
 }

@@ -317,12 +317,14 @@ A_Err RenderEffect(
         request.pixel_data = ConvertTo8bpc(input, bpp);
         request.rowbytes = input->width * 4; // 8bpc, no padding
 
-        // Read effect parameters from AE
+        // Read effect parameters from AE. Slider values are PF_FpLong (double) —
+        // cast explicitly to float to match our FrameRequest fields and silence
+        // MSVC C4244 truncation warnings.
         request.output_mode = params[PARAM_OUTPUT_MODE]->u.pd.value - 1;
-        request.despill = params[PARAM_DESPILL_STRENGTH]->u.fs_d.value;
-        request.despeckle = params[PARAM_DESPECKLE_STRENGTH]->u.fs_d.value;
-        request.refiner = params[PARAM_REFINER_STRENGTH]->u.fs_d.value;
-        request.matte_cleanup = params[PARAM_MATTE_CLEANUP]->u.fs_d.value;
+        request.despill       = static_cast<float>(params[PARAM_DESPILL_STRENGTH]->u.fs_d.value);
+        request.despeckle     = static_cast<float>(params[PARAM_DESPECKLE_STRENGTH]->u.fs_d.value);
+        request.refiner       = static_cast<float>(params[PARAM_REFINER_STRENGTH]->u.fs_d.value);
+        request.matte_cleanup = static_cast<float>(params[PARAM_MATTE_CLEANUP]->u.fs_d.value);
 
         // Check out the alpha hint layer (if user selected one)
         PF_ParamDef hint_param;
@@ -492,12 +494,12 @@ A_Err SmartRender(
                               in_data->time_step, in_data->time_scale, &cleanup_param));
 
         if (!err) {
-            request.output_mode = mode_param.u.pd.value - 1;
-            request.quality_mode = quality_param.u.pd.value - 1;
-            request.despill = despill_param.u.fs_d.value;
-            request.despeckle = despeckle_param.u.fs_d.value;
-            request.refiner = refiner_param.u.fs_d.value;
-            request.matte_cleanup = cleanup_param.u.fs_d.value;
+            request.output_mode   = mode_param.u.pd.value - 1;
+            request.quality_mode  = quality_param.u.pd.value - 1;
+            request.despill       = static_cast<float>(despill_param.u.fs_d.value);
+            request.despeckle     = static_cast<float>(despeckle_param.u.fs_d.value);
+            request.refiner       = static_cast<float>(refiner_param.u.fs_d.value);
+            request.matte_cleanup = static_cast<float>(cleanup_param.u.fs_d.value);
         }
 
         ERR2(PF_CHECKIN_PARAM(in_data, &mode_param));

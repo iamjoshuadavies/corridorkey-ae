@@ -21,16 +21,16 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
-from numpy.typing import NDArray
 
-from engines.base import InferenceEngine, InferenceRequest, InferenceResult
 from engines._greenformer import GreenFormer, load_state_dict_into
-from engines._weights_loader import find_or_download_weights, load_state_dict_from_path  # noqa: F401
+from engines._weights_loader import (  # noqa: F401
+    find_or_download_weights,
+    load_state_dict_from_path,
+)
+from engines.base import InferenceEngine, InferenceRequest, InferenceResult
 
 logger = logging.getLogger("corridorkey.engines.pytorch")
 
@@ -52,7 +52,7 @@ _QUALITY_PROFILES = {
 _DEFAULT_QUALITY = 3
 
 
-def _quality_profile(quality_mode: int) -> "tuple[int, bool]":
+def _quality_profile(quality_mode: int) -> tuple[int, bool]:
     return _QUALITY_PROFILES.get(quality_mode, _QUALITY_PROFILES[_DEFAULT_QUALITY])
 
 
@@ -68,14 +68,14 @@ class PyTorchEngine(InferenceEngine):
         self._device = None
         self._dtype = None
         self._prefer_fp16 = prefer_fp16
-        self._raw_state_dict: Optional[dict] = None     # CPU-resident, cached for rebuilds
-        self._models: "dict[int, GreenFormer]" = {}     # img_size -> built model on device
-        self._model_path: Optional[str] = None
+        self._raw_state_dict: dict | None = None     # CPU-resident, cached for rebuilds
+        self._models: dict[int, GreenFormer] = {}     # img_size -> built model on device
+        self._model_path: str | None = None
 
         # Raw model output cache — same as MLXEngine.
-        self._raw_cache_key: Optional[str] = None
-        self._raw_cache_alpha: Optional[np.ndarray] = None
-        self._raw_cache_fg: Optional[np.ndarray] = None
+        self._raw_cache_key: str | None = None
+        self._raw_cache_alpha: np.ndarray | None = None
+        self._raw_cache_fg: np.ndarray | None = None
 
     @property
     def device_name(self) -> str:
@@ -170,7 +170,7 @@ class PyTorchEngine(InferenceEngine):
 
     def _prepare_input(
         self, rgb: np.ndarray, alpha_hint: np.ndarray, model_img_size: int
-    ) -> "tuple[any, tuple[int, int, int, int], tuple[int, int]]":
+    ) -> tuple[any, tuple[int, int, int, int], tuple[int, int]]:
         """Build a [1, 4, model_img_size, model_img_size] tensor from RGB + hint.
 
         Returns the tensor, the (top, left, work_h, work_w) crop box of the
@@ -178,7 +178,7 @@ class PyTorchEngine(InferenceEngine):
         (h, w) of the input frame.
         """
         import torch
-        import torch.nn.functional as F
+        import torch.nn.functional as F  # noqa: N812  (PyTorch convention)
 
         h, w = rgb.shape[:2]
 
@@ -214,10 +214,10 @@ class PyTorchEngine(InferenceEngine):
         return x, (pad_top, pad_left, work_h, work_w), (h, w)
 
     def _crop_and_unpad(
-        self, output: dict, crop_box: "tuple[int,int,int,int]", original: "tuple[int,int]"
-    ) -> "tuple[np.ndarray, np.ndarray]":
+        self, output: dict, crop_box: tuple[int,int,int,int], original: tuple[int,int]
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Crop padded model output back to the original frame dimensions."""
-        import torch.nn.functional as F
+        import torch.nn.functional as F  # noqa: N812  (PyTorch convention)
 
         pad_top, pad_left, work_h, work_w = crop_box
         orig_h, orig_w = original
@@ -226,8 +226,12 @@ class PyTorchEngine(InferenceEngine):
         fg    = output["fg"][:, :, pad_top:pad_top + work_h, pad_left:pad_left + work_w]
 
         if (work_h, work_w) != (orig_h, orig_w):
-            alpha = F.interpolate(alpha, size=(orig_h, orig_w), mode="bilinear", align_corners=False)
-            fg    = F.interpolate(fg, size=(orig_h, orig_w), mode="bilinear", align_corners=False)
+            alpha = F.interpolate(
+                alpha, size=(orig_h, orig_w), mode="bilinear", align_corners=False,
+            )
+            fg = F.interpolate(
+                fg, size=(orig_h, orig_w), mode="bilinear", align_corners=False,
+            )
 
         alpha = alpha.float()
         fg    = fg.float()
@@ -244,26 +248,16 @@ class PyTorchEngine(InferenceEngine):
             return InferenceResult(image=request.image, success=False, error="Model not loaded")
 
         try:
-            import time as _time
             import torch
-
-            _t_total = _time.perf_counter()
-            _steps: list[tuple[str, float]] = []
-            def _tick(label: str, start: float) -> float:
-                now = _time.perf_counter()
-                _steps.append((label, (now - start) * 1000))
-                return now
 
             argb = request.image
             h, w = argb.shape[:2]
 
-            _t = _time.perf_counter()
             # ARGB -> RGB
             rgb = np.zeros((h, w, 3), dtype=np.uint8)
             rgb[:, :, 0] = argb[:, :, 1]
             rgb[:, :, 1] = argb[:, :, 2]
             rgb[:, :, 2] = argb[:, :, 3]
-            _t = _tick("argb->rgb", _t)
 
             alpha_hint = getattr(request, "_alpha_hint", None)
             if alpha_hint is None:
@@ -285,7 +279,6 @@ class PyTorchEngine(InferenceEngine):
             # (which is where keying actually matters).
             pix_md5  = hashlib.md5(rgb.tobytes()).hexdigest()
             hint_md5 = hashlib.md5(alpha_hint.tobytes()).hexdigest()
-            _t = _tick("hash", _t)
             raw_key = (
                 f"{pix_md5}:{hint_md5}:{request.refiner:.3f}:{h}:{w}:{quality_mode}"
             )
@@ -293,13 +286,10 @@ class PyTorchEngine(InferenceEngine):
             if raw_key == self._raw_cache_key and self._raw_cache_alpha is not None:
                 alpha = self._raw_cache_alpha.copy()
                 fg = self._raw_cache_fg.copy()
-                _t = _tick("cache_hit", _t)
                 logger.info("Raw model cache HIT — skipping inference")
             else:
                 model = self._get_model(model_img_size)
-                _t = _tick("get_model", _t)
                 x, crop_box, orig_size = self._prepare_input(rgb, alpha_hint, model_img_size)
-                _t = _tick("prepare_input", _t)
 
                 with torch.no_grad():
                     refiner_scale = (
@@ -307,16 +297,16 @@ class PyTorchEngine(InferenceEngine):
                         if not skip_refiner else None
                     )
                     output = model(x, refiner_scale=refiner_scale, skip_refiner=skip_refiner)
-                    if torch.cuda.is_available():
-                        torch.cuda.synchronize()
-                _t = _tick("model_forward", _t)
 
                 alpha, fg = self._crop_and_unpad(output, crop_box, orig_size)
-                _t = _tick("crop_unpad", _t)
 
                 self._raw_cache_key = raw_key
                 self._raw_cache_alpha = alpha.copy()
                 self._raw_cache_fg = fg.copy()
+                logger.info(
+                    "Inference complete (img_size=%d skip_refiner=%s) — cached",
+                    model_img_size, skip_refiner,
+                )
 
             # Postprocessing
             from engines.postprocess import apply_postprocessing
@@ -326,7 +316,6 @@ class PyTorchEngine(InferenceEngine):
                 despeckle_strength=request.despeckle,
                 matte_cleanup_strength=request.matte_cleanup,
             )
-            _t = _tick("postprocess", _t)
 
             alpha_3ch = alpha[:, :, np.newaxis].astype(np.float32) / 255.0
             comp = (fg.astype(np.float32) * alpha_3ch).astype(np.uint8)
@@ -354,11 +343,6 @@ class PyTorchEngine(InferenceEngine):
                 output_argb[:, :, 3] = comp[:, :, 2]
             else:
                 output_argb = argb
-
-            _t = _tick("compose_output", _t)
-            total_ms = (_time.perf_counter() - _t_total) * 1000
-            breakdown = "  ".join(f"{k}={v:.0f}ms" for k, v in _steps)
-            logger.info("Process breakdown: total=%.0fms  %s", total_ms, breakdown)
 
             return InferenceResult(image=output_argb, success=True)
 
