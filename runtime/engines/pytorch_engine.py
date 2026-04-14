@@ -105,9 +105,10 @@ class PyTorchEngine(InferenceEngine):
             located = find_or_download_weights()
             if located is None:
                 raise FileNotFoundError(
-                    "No CorridorKey weights found. Set CORRIDORKEY_PT_WEIGHTS, "
-                    "install EZ-CorridorKey, or allow the runtime to download "
-                    "the public corridorkey_mlx safetensors release."
+                    "No CorridorKey weights found and download failed. "
+                    "Set CORRIDORKEY_PT_WEIGHTS to a local .pth or "
+                    ".safetensors checkpoint, or check your network "
+                    "connection and retry."
                 )
             path, fmt = located
             self._model_path = str(path)

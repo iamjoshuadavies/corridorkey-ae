@@ -12,11 +12,8 @@ Two sources, tried in order:
 
 The cached download lives in <user data dir>/CorridorKey/models/ — usually
 %LOCALAPPDATA%\\CorridorKey\\models on Windows. Downloads happen on first
-run if the cache is empty.
-
-We do NOT auto-detect EZ-CorridorKey installs. EZ-CorridorKey is a separate
-commercial product; CorridorKey AE is fully self-hosting via the upstream
-corridorkey-mlx release.
+run if the cache is empty. CorridorKey AE is fully self-hosting via the
+upstream corridorkey-mlx release — no external tool needs to be installed.
 
 The reverse converter (MLX -> PyTorch state_dict) is the inverse of
 nikopueringer/corridorkey-mlx's convert/converter.py:

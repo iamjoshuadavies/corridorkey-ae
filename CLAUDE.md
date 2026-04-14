@@ -97,8 +97,7 @@ launcher chain swallows stdout before it reaches the parent's pipe).
   refiner stem keys), and loads them strict into the vendored model.
   Cache lives at `%LOCALAPPDATA%\CorridorKey\models\`.
   Discovery order: `CORRIDORKEY_PT_WEIGHTS` env (escape hatch) → cache
-  → fresh download. We do NOT auto-detect EZ-CorridorKey installs —
-  that's a separate commercial product.
+  → fresh download. Fully self-hosted — no external tool required.
   Multi-resolution model cache wired to the Quality dropdown:
   Fastest=512 (no refiner), Fast=512, High=1024, Full Res=2048. Per
   resolution the GreenFormer is built lazily and pos_embed is bicubic-

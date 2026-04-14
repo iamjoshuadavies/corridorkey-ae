@@ -16,10 +16,9 @@ from engines.base import InferenceEngine, InferenceRequest, InferenceResult
 
 logger = logging.getLogger("corridorkey.engines.mlx")
 
-# CorridorKey AE manages its own weight cache. We do NOT auto-detect
-# EZ-CorridorKey installs — that's a separate commercial product. Weights
-# are downloaded from the upstream corridorkey-mlx GitHub release on first
-# run if the cache is empty.
+# Weights are downloaded from the upstream corridorkey-mlx GitHub release
+# on first run and cached here. Everything CorridorKey AE needs lives
+# inside this directory — we do not rely on any external install.
 WEIGHT_CACHE_DIR = (
     Path.home() / "Library" / "Application Support" / "CorridorKey" / "models"
 )

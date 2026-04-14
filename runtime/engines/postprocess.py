@@ -1,8 +1,9 @@
 """
 Post-processing operations for keyed output.
 
-Adapted from EZ-CorridorKey's CorridorKeyModule/core/color_utils.py
-(https://github.com/edenaion/EZ-CorridorKey).
+Despill uses a standard luminance-preserving chroma key formula
+(remove excess green above a limit = (R+B)/2, redistribute evenly to R/B).
+Matte cleanup uses OpenCV connected-components + dilate + blur.
 
 All functions operate on numpy arrays (float32, 0-1 range).
 """
