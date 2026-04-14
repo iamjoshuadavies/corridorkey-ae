@@ -1,18 +1,22 @@
 """
 Weights discovery + loading for the PyTorch CorridorKey engine.
 
-Three sources, tried in order:
+Two sources, tried in order:
 
-  1. CORRIDORKEY_PT_WEIGHTS env var pointing at a local .pth or .safetensors.
+  1. CORRIDORKEY_PT_WEIGHTS env var pointing at a local .pth or .safetensors
+     (escape hatch for development / custom checkpoints).
   2. Cached download of the official MLX-format safetensors from
      github.com/nikopueringer/corridorkey-mlx Releases. The MLX format is a
      deterministic transform of the original PyTorch state_dict; we apply
      the inverse here to load it into a PyTorch GreenFormer.
-  3. Fallback: a local EZ-CorridorKey install's CorridorKey_v1.0.pth
-     (located via EZ_CORRIDORKEY_PATH or ~/Desktop/EZ-CorridorKey).
 
 The cached download lives in <user data dir>/CorridorKey/models/ — usually
-%LOCALAPPDATA%\\CorridorKey\\models on Windows.
+%LOCALAPPDATA%\\CorridorKey\\models on Windows. Downloads happen on first
+run if the cache is empty.
+
+We do NOT auto-detect EZ-CorridorKey installs. EZ-CorridorKey is a separate
+commercial product; CorridorKey AE is fully self-hosting via the upstream
+corridorkey-mlx release.
 
 The reverse converter (MLX -> PyTorch state_dict) is the inverse of
 nikopueringer/corridorkey-mlx's convert/converter.py:
@@ -33,32 +37,6 @@ from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger("corridorkey.engines.weights")
-
-
-# ---------------------------------------------------------------------------
-# Discovery paths
-# ---------------------------------------------------------------------------
-
-_EZ_SEARCH_PATHS = [
-    Path.home() / "Desktop" / "EZ-CorridorKey",
-    Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "EZ-CorridorKey",
-    Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "EZ-CorridorKey",
-]
-
-
-def _find_ez_corridorkey_pth() -> Optional[Path]:
-    """Look for a CorridorKey_v1.0.pth inside an EZ-CorridorKey install."""
-    env = os.environ.get("EZ_CORRIDORKEY_PATH")
-    if env:
-        candidate = Path(env) / "CorridorKeyModule" / "checkpoints" / "CorridorKey_v1.0.pth"
-        if candidate.exists():
-            return candidate
-
-    for root in _EZ_SEARCH_PATHS:
-        candidate = root / "CorridorKeyModule" / "checkpoints" / "CorridorKey_v1.0.pth"
-        if candidate.exists():
-            return candidate
-    return None
 
 
 def _user_cache_dir() -> Path:
@@ -171,12 +149,14 @@ def _convert_mlx_safetensors_to_pytorch(path: Path) -> dict:
 
 
 def _load_pytorch_pth(path: Path) -> dict:
-    """Load an EZ-CorridorKey-style .pth and return a stripped state_dict."""
+    """Load a .pth checkpoint (CORRIDORKEY_PT_WEIGHTS escape hatch).
+
+    Strips the `_orig_mod.` torch.compile prefix from state_dict keys.
+    """
     import torch
 
     raw = torch.load(str(path), map_location="cpu", weights_only=False)
     sd = raw.get("state_dict", raw) if isinstance(raw, dict) else raw
-    # Strip torch.compile prefix
     cleaned = {}
     for k, v in sd.items():
         if k.startswith("_orig_mod."):
@@ -199,7 +179,7 @@ def find_or_download_weights(
         Tuple of (path, format) where format is "pth" or "safetensors", or
         None if no weights could be obtained.
     """
-    # 1. Explicit override
+    # 1. Explicit override (escape hatch for development / custom weights)
     env = os.environ.get("CORRIDORKEY_PT_WEIGHTS")
     if env:
         p = Path(env)
@@ -209,19 +189,13 @@ def find_or_download_weights(
             return (p, fmt)
         logger.warning("CORRIDORKEY_PT_WEIGHTS set but not found: %s", env)
 
-    # 2. Cached download
+    # 2. Cached download (canonical source)
     cached = _user_cache_dir() / EXPECTED_SAFETENSORS_NAME
     if cached.exists():
         logger.info("Using cached weights: %s", cached)
         return (cached, "safetensors")
 
-    # 3. EZ-CorridorKey fallback (.pth)
-    ez = _find_ez_corridorkey_pth()
-    if ez is not None:
-        logger.info("Using EZ-CorridorKey weights: %s", ez)
-        return (ez, "pth")
-
-    # 4. Download as last resort
+    # 3. Download
     if allow_download:
         downloaded = _download_mlx_safetensors(cached)
         if downloaded is not None:

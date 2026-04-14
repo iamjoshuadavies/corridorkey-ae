@@ -18,38 +18,34 @@ from engines.base import InferenceEngine, InferenceRequest, InferenceResult
 
 logger = logging.getLogger("corridorkey.engines.mlx")
 
-# Known model weight locations (checked in order)
-MODEL_SEARCH_PATHS = [
-    # Our own cache
-    Path.home() / "Library" / "Application Support" / "CorridorKey" / "models" / "corridorkey_mlx.safetensors",
-    # EZ-CorridorKey's install
-    Path.home() / "Library" / "Application Support" / "EZ-CorridorKey" / "CorridorKeyModule" / "checkpoints" / "corridorkey_mlx.safetensors",
-    # App bundle location
-    Path("/Applications/EZ-CorridorKey.app/Contents/MacOS/CorridorKeyModule/checkpoints/corridorkey_mlx.safetensors"),
-]
+# CorridorKey AE manages its own weight cache. We do NOT auto-detect
+# EZ-CorridorKey installs — that's a separate commercial product. Weights
+# are downloaded from the upstream corridorkey-mlx GitHub release on first
+# run if the cache is empty.
+WEIGHT_CACHE_DIR = (
+    Path.home() / "Library" / "Application Support" / "CorridorKey" / "models"
+)
+WEIGHT_FILENAME = "corridorkey_mlx.safetensors"
 
 
 def find_model_weights() -> Optional[Path]:
-    """Search for corridorkey_mlx.safetensors in known locations."""
-    for path in MODEL_SEARCH_PATHS:
-        if path.exists():
-            logger.info("Found model weights at: %s", path)
-            return path
-    logger.info("No model weights found locally — attempting download...")
+    """Return the cached weight path, downloading on first run if needed."""
+    cached = WEIGHT_CACHE_DIR / WEIGHT_FILENAME
+    if cached.exists():
+        logger.info("Using cached weights: %s", cached)
+        return cached
+    logger.info("No cached weights — attempting download...")
     return download_model_weights()
 
 
 def download_model_weights() -> Optional[Path]:
-    """Download model weights from the corridorkey-mlx GitHub release."""
+    """Download MLX weights from the upstream corridorkey-mlx GitHub release."""
     try:
         from corridorkey_mlx.weights import download_weights
 
-        # Download to our own cache location
-        dest = Path.home() / "Library" / "Application Support" / "CorridorKey" / "models"
-        dest.mkdir(parents=True, exist_ok=True)
-
-        logger.info("Downloading CorridorKey model weights to %s ...", dest)
-        path = download_weights(out=dest)
+        WEIGHT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        logger.info("Downloading CorridorKey model weights to %s ...", WEIGHT_CACHE_DIR)
+        path = download_weights(out=WEIGHT_CACHE_DIR)
         logger.info("Model weights downloaded: %s", path)
         return path
 

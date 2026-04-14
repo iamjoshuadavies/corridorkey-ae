@@ -83,8 +83,9 @@ launcher chain swallows stdout before it reaches the parent's pipe).
 ### Inference Pipeline
 - macOS: **MLX engine** via `corridorkey_mlx` package (pip from GitHub).
   Tiled inference (tile_size=512, overlap=64). ~4.6s/frame at 1080p,
-  ~0.3s at 512×512. Weights at
-  `~/Library/Application Support/EZ-CorridorKey/CorridorKeyModule/checkpoints/corridorkey_mlx.safetensors`.
+  ~0.3s at 512×512. Weights cached at
+  `~/Library/Application Support/CorridorKey/models/corridorkey_mlx.safetensors`,
+  auto-downloaded from the upstream GitHub release on first run.
   img_size=2048 is NOT viable on M1 (~450s/frame).
 - Windows: **PyTorch engine** (`runtime/engines/pytorch_engine.py`).
   Self-contained — uses a vendored `GreenFormer` (`_greenformer.py`,
@@ -95,8 +96,9 @@ launcher chain swallows stdout before it reaches the parent's pipe).
   PyTorch→MLX converter (transpose conv kernels NCHW↔NHWC + rename
   refiner stem keys), and loads them strict into the vendored model.
   Cache lives at `%LOCALAPPDATA%\CorridorKey\models\`.
-  Discovery order: `CORRIDORKEY_PT_WEIGHTS` env → cache → local
-  EZ-CorridorKey install → fresh download.
+  Discovery order: `CORRIDORKEY_PT_WEIGHTS` env (escape hatch) → cache
+  → fresh download. We do NOT auto-detect EZ-CorridorKey installs —
+  that's a separate commercial product.
   Multi-resolution model cache wired to the Quality dropdown:
   Fastest=512 (no refiner), Fast=512, High=1024, Full Res=2048. Per
   resolution the GreenFormer is built lazily and pos_embed is bicubic-

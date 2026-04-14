@@ -12,7 +12,7 @@
 ---
 
 > **Status:** Active development. Keying pipeline working end-to-end on both
-> platforms, both bootstrapping from zero (no EZ-CorridorKey required).
+> platforms — both bootstrap from zero on first run with no extra setup.
 > - **macOS (Apple Silicon):** MLX inference, ~4.6s/frame at 1080p (tiled).
 > - **Windows (x64):** PyTorch CUDA inference. Quality dropdown switches
 >   between 512/1024/2048 model sizes; ~165 ms at Fastest, ~558 ms at Full
@@ -20,8 +20,9 @@
 >
 > Both platforms download the model weights on first run from the
 > [corridorkey-mlx](https://github.com/nikopueringer/corridorkey-mlx)
-> GitHub release. Windows applies a reverse MLX→PyTorch conversion to the
-> downloaded safetensors and loads them into a vendored GreenFormer.
+> GitHub release (~398 MB, one-time, cached locally). The Windows path
+> applies a reverse MLX→PyTorch conversion to load the downloaded
+> safetensors into a vendored GreenFormer.
 
 ## What It Does
 
@@ -120,8 +121,7 @@ pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 --index-url https://dow
 
 # That's it — the runtime auto-downloads the model weights (~398 MB) from
 # the corridorkey-mlx GitHub release on first frame and caches them under
-# %LOCALAPPDATA%\CorridorKey\models\. If you have EZ-CorridorKey installed
-# at ~/Desktop/EZ-CorridorKey it will be picked up as a fallback.
+# %LOCALAPPDATA%\CorridorKey\models\.
 
 # Install the .aex into AE's plug-ins folder (admin shell required —
 # Program Files is protected). Close AE first; the file is locked while open.
