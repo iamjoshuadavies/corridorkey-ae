@@ -26,10 +26,7 @@ from pathlib import Path
 import numpy as np
 
 from engines._greenformer import GreenFormer, load_state_dict_into
-from engines._weights_loader import (  # noqa: F401
-    find_or_download_weights,
-    load_state_dict_from_path,
-)
+from engines._weights_loader import load_pytorch_state_dict, resolve_pytorch_weights
 from engines.base import InferenceEngine, InferenceRequest, InferenceResult
 
 logger = logging.getLogger("corridorkey.engines.pytorch")
@@ -100,9 +97,9 @@ class PyTorchEngine(InferenceEngine):
             # Caller passed an explicit path
             self._model_path = model_path
             fmt = "safetensors" if model_path.endswith(".safetensors") else "pth"
-            sd = load_state_dict_from_path(Path(model_path), fmt)
+            sd = load_pytorch_state_dict(Path(model_path), fmt)
         else:
-            located = find_or_download_weights()
+            located = resolve_pytorch_weights()
             if located is None:
                 raise FileNotFoundError(
                     "No CorridorKey weights found and download failed. "
@@ -112,7 +109,7 @@ class PyTorchEngine(InferenceEngine):
                 )
             path, fmt = located
             self._model_path = str(path)
-            sd = load_state_dict_from_path(path, fmt)
+            sd = load_pytorch_state_dict(path, fmt)
 
         self._raw_state_dict = sd
 

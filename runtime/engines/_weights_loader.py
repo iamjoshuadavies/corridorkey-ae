@@ -1,64 +1,95 @@
 """
-Weights discovery + loading for the PyTorch CorridorKey engine.
+Weights discovery + loading, shared by both inference engines.
 
-Two sources, tried in order:
+Both the macOS MLX engine and the Windows PyTorch engine consume the
+same `corridorkey_mlx.safetensors` release from upstream. This module
+is the single place that knows how to:
 
-  1. CORRIDORKEY_PT_WEIGHTS env var pointing at a local .pth or .safetensors
-     (escape hatch for development / custom checkpoints).
-  2. Cached download of the official MLX-format safetensors from
-     github.com/nikopueringer/corridorkey-mlx Releases. The MLX format is a
-     deterministic transform of the original PyTorch state_dict; we apply
-     the inverse here to load it into a PyTorch GreenFormer.
+  - Pick a platform-appropriate cache directory
+      macOS  :  ~/Library/Application Support/CorridorKey/models/
+      Windows:  %LOCALAPPDATA%/CorridorKey/models/
+      Linux  :  $XDG_DATA_HOME/CorridorKey/models/
+  - Download the official release on first run with progress logging
+  - (PyTorch only) reverse-convert the MLX safetensors into a PyTorch
+    state_dict, the inverse of corridorkey-mlx's convert/converter.py:
+      * rename refiner.stem_conv.X     -> refiner.stem.0.X
+      * rename refiner.stem_gn.X       -> refiner.stem.1.X
+      * transpose conv weights (O,H,W,I) -> (O,I,H,W)
+      * num_batches_tracked is absent in MLX; strict=False accepts it
+  - (PyTorch only) load a local .pth checkpoint (dev escape hatch)
 
-The cached download lives in <user data dir>/CorridorKey/models/ — usually
-%LOCALAPPDATA%\\CorridorKey\\models on Windows. Downloads happen on first
-run if the cache is empty. CorridorKey AE is fully self-hosting via the
-upstream corridorkey-mlx release — no external tool needs to be installed.
+MLX engine usage:
+    from engines._weights_loader import get_mlx_safetensors_path
+    path = get_mlx_safetensors_path()   # downloads if cache empty
 
-The reverse converter (MLX -> PyTorch state_dict) is the inverse of
-nikopueringer/corridorkey-mlx's convert/converter.py:
-
-  - rename refiner.stem_conv.X      -> refiner.stem.0.X
-  - rename refiner.stem_gn.X        -> refiner.stem.1.X
-  - transpose conv weights (O,H,W,I) -> (O,I,H,W)
-  - num_batches_tracked is missing in the MLX format; PyTorch BatchNorm
-    accepts strict=False loads where this is absent.
+PyTorch engine usage:
+    from engines._weights_loader import (
+        resolve_pytorch_weights, load_pytorch_state_dict,
+    )
+    located = resolve_pytorch_weights()
+    path, fmt = located
+    sd = load_pytorch_state_dict(path, fmt)
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import sys
 import urllib.request
 from pathlib import Path
 
 logger = logging.getLogger("corridorkey.engines.weights")
 
 
-def _user_cache_dir() -> Path:
-    """Return a per-user cache directory for CorridorKey weights."""
-    if os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
-    elif "darwin" in os.sys.platform:  # type: ignore[attr-defined]
-        base = Path.home() / "Library" / "Application Support"
-    else:
-        base = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share")))
-    return base / "CorridorKey" / "models"
-
-
 # ---------------------------------------------------------------------------
-# MLX safetensors downloader
+# Release source of truth
 # ---------------------------------------------------------------------------
 
 CORRIDORKEY_MLX_RELEASE_URL = (
     "https://github.com/nikopueringer/corridorkey-mlx/releases/download/"
     "v1.0.0/corridorkey_mlx.safetensors"
 )
-EXPECTED_SAFETENSORS_NAME = "corridorkey_mlx.safetensors"
+WEIGHT_FILENAME = "corridorkey_mlx.safetensors"
 
+
+# ---------------------------------------------------------------------------
+# Cache directory
+# ---------------------------------------------------------------------------
+
+def _user_cache_dir() -> Path:
+    """Return a per-user cache directory for CorridorKey weights.
+
+    Uses native locations per platform so that users following each
+    OS's conventions find the cache where they expect.
+    """
+    if os.name == "nt":
+        base = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share")))
+    return base / "CorridorKey" / "models"
+
+
+def cached_weights_path() -> Path:
+    """Return the canonical cache path for the MLX safetensors file.
+
+    Does NOT check existence — call `.exists()` yourself.
+    """
+    return _user_cache_dir() / WEIGHT_FILENAME
+
+
+# ---------------------------------------------------------------------------
+# Downloader
+# ---------------------------------------------------------------------------
 
 def _download_mlx_safetensors(dest: Path) -> Path | None:
-    """Download the official MLX safetensors release. ~398 MB."""
+    """Download the official MLX safetensors release. ~398 MB.
+
+    Writes to `<dest>.part` and atomically renames on success so a
+    cancelled download doesn't leave a half-file masquerading as valid.
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
     logger.info("Downloading CorridorKey weights from %s", CORRIDORKEY_MLX_RELEASE_URL)
@@ -92,8 +123,24 @@ def _download_mlx_safetensors(dest: Path) -> Path | None:
         return None
 
 
+def get_mlx_safetensors_path(allow_download: bool = True) -> Path | None:
+    """Shared entry point for both engines. Returns the path to the cached
+    `corridorkey_mlx.safetensors`, downloading it on first run if needed.
+
+    Returns None if the cache is empty and either `allow_download=False`
+    or the download failed.
+    """
+    cached = cached_weights_path()
+    if cached.exists():
+        logger.info("Using cached weights: %s", cached)
+        return cached
+    if not allow_download:
+        return None
+    return _download_mlx_safetensors(cached)
+
+
 # ---------------------------------------------------------------------------
-# MLX -> PyTorch state_dict reverse conversion
+# PyTorch-specific: MLX safetensors -> state_dict reverse conversion
 # ---------------------------------------------------------------------------
 
 # Inverse of corridorkey-mlx's REFINER_STEM_MAP.
@@ -132,15 +179,11 @@ def _convert_mlx_safetensors_to_pytorch(path: Path) -> dict:
     raw = load_file(str(path))
     state_dict: dict = {}
     for src_key, arr in raw.items():
-        # Reverse refiner stem renames
         dest_key = _REFINER_STEM_REVERSE_MAP.get(src_key, src_key)
-
         if dest_key in _PYTORCH_CONV_WEIGHT_KEYS:
             # MLX (O, H, W, I) -> PyTorch (O, I, H, W)
             arr = arr.transpose(0, 3, 1, 2)
-
         state_dict[dest_key] = torch.from_numpy(arr.copy())
-
     return state_dict
 
 
@@ -163,19 +206,19 @@ def _load_pytorch_pth(path: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Public API
+# PyTorch engine public API
 # ---------------------------------------------------------------------------
 
-def find_or_download_weights(
-    allow_download: bool = True,
-) -> tuple[Path, str] | None:
-    """Locate weights on disk, downloading if necessary.
+def resolve_pytorch_weights(allow_download: bool = True) -> tuple[Path, str] | None:
+    """Locate PyTorch-loadable weights, downloading if necessary.
 
-    Returns:
-        Tuple of (path, format) where format is "pth" or "safetensors", or
-        None if no weights could be obtained.
+    Discovery order:
+      1. CORRIDORKEY_PT_WEIGHTS env var (escape hatch — local .pth or .safetensors)
+      2. Shared cached MLX safetensors download
+
+    Returns (path, format) where format is "pth" or "safetensors",
+    or None if nothing could be obtained.
     """
-    # 1. Explicit override (escape hatch for development / custom weights)
     env = os.environ.get("CORRIDORKEY_PT_WEIGHTS")
     if env:
         p = Path(env)
@@ -185,22 +228,13 @@ def find_or_download_weights(
             return (p, fmt)
         logger.warning("CORRIDORKEY_PT_WEIGHTS set but not found: %s", env)
 
-    # 2. Cached download (canonical source)
-    cached = _user_cache_dir() / EXPECTED_SAFETENSORS_NAME
-    if cached.exists():
-        logger.info("Using cached weights: %s", cached)
+    cached = get_mlx_safetensors_path(allow_download=allow_download)
+    if cached is not None:
         return (cached, "safetensors")
-
-    # 3. Download
-    if allow_download:
-        downloaded = _download_mlx_safetensors(cached)
-        if downloaded is not None:
-            return (downloaded, "safetensors")
-
     return None
 
 
-def load_state_dict_from_path(path: Path, fmt: str) -> dict:
+def load_pytorch_state_dict(path: Path, fmt: str) -> dict:
     """Load a state_dict from disk in either supported format."""
     if fmt == "pth":
         return _load_pytorch_pth(path)

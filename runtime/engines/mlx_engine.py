@@ -12,46 +12,19 @@ from pathlib import Path
 
 import numpy as np
 
+from engines._weights_loader import get_mlx_safetensors_path
 from engines.base import InferenceEngine, InferenceRequest, InferenceResult
 
 logger = logging.getLogger("corridorkey.engines.mlx")
 
-# Weights are downloaded from the upstream corridorkey-mlx GitHub release
-# on first run and cached here. Everything CorridorKey AE needs lives
-# inside this directory — we do not rely on any external install.
-WEIGHT_CACHE_DIR = (
-    Path.home() / "Library" / "Application Support" / "CorridorKey" / "models"
-)
-WEIGHT_FILENAME = "corridorkey_mlx.safetensors"
-
 
 def find_model_weights() -> Path | None:
-    """Return the cached weight path, downloading on first run if needed."""
-    cached = WEIGHT_CACHE_DIR / WEIGHT_FILENAME
-    if cached.exists():
-        logger.info("Using cached weights: %s", cached)
-        return cached
-    logger.info("No cached weights — attempting download...")
-    return download_model_weights()
+    """Return the cached MLX weight path, downloading on first run if needed.
 
-
-def download_model_weights() -> Path | None:
-    """Download MLX weights from the upstream corridorkey-mlx GitHub release."""
-    try:
-        from corridorkey_mlx.weights import download_weights
-
-        WEIGHT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        logger.info("Downloading CorridorKey model weights to %s ...", WEIGHT_CACHE_DIR)
-        path = download_weights(out=WEIGHT_CACHE_DIR)
-        logger.info("Model weights downloaded: %s", path)
-        return path
-
-    except ImportError:
-        logger.error("corridorkey_mlx.weights not available for download")
-        return None
-    except Exception:
-        logger.exception("Failed to download model weights")
-        return None
+    Thin wrapper around the shared `_weights_loader.get_mlx_safetensors_path`
+    so that both macOS and Windows bootstrap through the same code.
+    """
+    return get_mlx_safetensors_path(allow_download=True)
 
 
 class MLXEngine(InferenceEngine):
