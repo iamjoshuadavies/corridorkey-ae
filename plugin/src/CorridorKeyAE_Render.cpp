@@ -14,6 +14,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <thread>
 
 namespace corridorkey {
 
@@ -521,12 +522,45 @@ A_Err SmartRender(
             request.hint_rowbytes = hint_world->width * 4;
         }
 
-        // Process through bridge (timed)
+        // Process through bridge. If the runtime replies with a LOADING
+        // status, the engine is still initialising (first-run download +
+        // warmup). We DO NOT return a pass-through frame in that case —
+        // AE would cache it as the final render for that (time, params)
+        // combination and we'd be stuck with wrong output until the user
+        // wiggled a slider. Instead, block this render call until the
+        // engine is ready or we hit a hard timeout, updating g_status
+        // each iteration so the custom UI can show progress. SmartRender
+        // runs on a worker thread (MFR), so AE's main thread stays free
+        // to redraw the UI while we wait.
         FrameResponse response;
-        auto t_start = std::chrono::steady_clock::now();
-        bool ok = !err && g_bridge.ProcessFrame(request, response) && response.success;
-        auto t_end = std::chrono::steady_clock::now();
-        float ms = std::chrono::duration<float, std::milli>(t_end - t_start).count();
+        bool ok = false;
+        float ms = 0.0f;
+        if (!err) {
+            constexpr int LOADING_TIMEOUT_MS = 120 * 1000;   // 2 minutes hard cap
+            constexpr int LOADING_POLL_MS    = 250;
+            auto loading_start = std::chrono::steady_clock::now();
+            auto t_start = loading_start;
+            while (true) {
+                t_start = std::chrono::steady_clock::now();
+                ok = g_bridge.ProcessFrame(request, response) && response.success;
+                if (ok || !response.loading) break;
+
+                // Engine is still loading — update status and retry.
+                g_status.bridge_connected = true;
+                const char* detail = response.loading_detail.empty()
+                    ? "Starting up" : response.loading_detail.c_str();
+                snprintf(g_status.status_text, sizeof(g_status.status_text),
+                         "Loading model (%s)...", detail);
+
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - loading_start).count();
+                if (elapsed >= LOADING_TIMEOUT_MS) break; // give up, surface error
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(LOADING_POLL_MS));
+            }
+            auto t_end = std::chrono::steady_clock::now();
+            ms = std::chrono::duration<float, std::milli>(t_end - t_start).count();
+        }
 
         if (ok) {
             size_t expected = static_cast<size_t>(output_world->width) * output_world->height * 4;
@@ -546,29 +580,18 @@ A_Err SmartRender(
                     "Ready  |  %.0fms  |  %dx%d  |  %dbpc",
                     ms, request.width, request.height, bpp * 2);
             }
-        } else if (response.loading) {
-            // Runtime is alive but engine is still loading (download +
-            // warmup on first run). Show a friendly status line and
-            // pass the input through unmodified.
-            g_status.bridge_connected = true;
-            const char* detail = response.loading_detail.empty()
-                ? "Starting up" : response.loading_detail.c_str();
-            snprintf(g_status.status_text, sizeof(g_status.status_text),
-                     "Loading model (%s)...", detail);
-            if (input_world->width == output_world->width &&
-                input_world->height == output_world->height) {
-                for (int y = 0; y < output_world->height; y++) {
-                    memcpy(
-                        reinterpret_cast<char*>(output_world->data) + y * output_world->rowbytes,
-                        reinterpret_cast<char*>(input_world->data) + y * input_world->rowbytes,
-                        output_world->rowbytes
-                    );
-                }
-            }
         } else {
             g_status.bridge_connected = true;
-            snprintf(g_status.status_text, sizeof(g_status.status_text), "Bridge error");
-            // Error fallback: copy input to output
+            if (response.loading) {
+                // Hit the 2-minute loading timeout. Very unusual — probably
+                // means the weight download is stuck or the network is dead.
+                snprintf(g_status.status_text, sizeof(g_status.status_text),
+                         "Model load timed out — retry");
+            } else {
+                snprintf(g_status.status_text, sizeof(g_status.status_text),
+                         "Bridge error");
+            }
+            // Fallback: copy input to output (same for error and loading-timeout)
             if (input_world->width == output_world->width &&
                 input_world->height == output_world->height) {
                 for (int y = 0; y < output_world->height; y++) {
