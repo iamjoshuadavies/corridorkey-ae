@@ -22,6 +22,12 @@ if(NOT DEFINED AE_SDK_PATH)
     set(AE_SDK_PATH "${_default_sdk}" CACHE PATH "Path to Adobe After Effects SDK")
 endif()
 
+# Normalize to forward slashes — on Windows the user may pass
+# backslash-delimited paths (D:\a\...) which CMake otherwise treats
+# as containing C-style escape sequences like \a when interpolated
+# into strings. file(TO_CMAKE_PATH) converts \ -> / in place.
+file(TO_CMAKE_PATH "${AE_SDK_PATH}" AE_SDK_PATH)
+
 if(NOT EXISTS "${AE_SDK_PATH}")
     message(WARNING
         "After Effects SDK not found at: ${AE_SDK_PATH}\n"
