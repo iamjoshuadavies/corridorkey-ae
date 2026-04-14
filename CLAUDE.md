@@ -115,4 +115,6 @@ Rebuilds auto-update. Restart AE to pick up changes.
 ```
 
 ## Licensing
-NOT YET RESOLVED — see LICENSE file. Do not describe as "open source."
+PolyForm Noncommercial 1.0.0 — source-available, free for non-commercial use.
+Users CAN use the tool in commercial VFX work. Users CANNOT sell the tool itself.
+Do not describe as "open source" — it is "source-available" under a non-commercial license.

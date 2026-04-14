@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="plugin/resources/logo_64.png" alt="CorridorKey" width="64" height="64">
+  <img src="plugin/resources/logo_256.png" alt="CorridorKey" width="128" height="128">
 </p>
 
 <h1 align="center">CorridorKey AE</h1>
@@ -136,4 +136,11 @@ Based on the green-screen keying technique created by **Niko Pueringer** of [Cor
 
 ## License
 
-**Not yet determined.** See [LICENSE](LICENSE) for details. The upstream CorridorKey project uses CC BY-NC-SA 4.0 with additional terms. Do not assume this project is open-source until licensing is resolved.
+[PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/) — see [LICENSE](LICENSE).
+
+- ✅ **Use commercially** — use CorridorKey AE on paid VFX/film/video projects
+- ✅ **View & modify source** — fork it, improve it, contribute back
+- ✅ **Share freely** — distribute to other creatives
+- ❌ **Don't sell the tool** — can't resell or build a competing commercial product from it
+
+The upstream [CorridorKey](https://github.com/nikopueringer/CorridorKey) is licensed under CC BY-NC-SA 4.0.
