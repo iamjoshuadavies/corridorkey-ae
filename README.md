@@ -16,7 +16,7 @@
 > - **macOS (Apple Silicon):** MLX inference, ~4.8s/frame at 1080p (tiled)
 >   on a MacBook Pro M5.
 > - **Windows (x64):** PyTorch CUDA inference. Quality dropdown switches
->   between 512/1024/2048 model sizes; ~165 ms at Fastest, ~558 ms at Full
+>   between 512/1024/2048 model sizes; ~190 ms at Fastest, ~610 ms at Full
 >   Res on an RTX 4090.
 >
 > Both platforms download the model weights on first run from the
@@ -79,10 +79,10 @@ different model size (pos_embed bicubic-interpolated at load time):
 
 | Quality Mode | Model | Speed (1080p input) |
 |---|---|---|
-| Fastest (256) | 512 no refiner | ~165 ms |
-| Fast (512) | 512 + refiner | ~173 ms |
-| High (1024) | 1024 + refiner | ~234 ms |
-| Full Res | 2048 + refiner | ~558 ms |
+| Fastest (256) | 512 no refiner | ~187 ms |
+| Fast (512) | 512 + refiner | ~230 ms |
+| High (1024) | 1024 + refiner | ~286 ms |
+| Full Res | 2048 + refiner | ~612 ms |
 
 All three model sizes stay live on the GPU together (~0.5 GB total VRAM)
 so switching Quality doesn't trigger a reload. Cached frames return

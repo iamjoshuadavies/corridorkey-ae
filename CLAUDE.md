@@ -107,7 +107,7 @@ launcher chain swallows stdout before it reaches the parent's pipe).
   resolution the GreenFormer is built lazily and pos_embed is bicubic-
   interpolated from the checkpoint's native size. All three sizes
   combined use ~0.5 GB VRAM. Steady-state on RTX 4090 fp16:
-  Fastest ~165 ms, Fast ~173 ms, High ~234 ms, Full Res ~558 ms.
+  Fastest ~187 ms, Fast ~230 ms, High ~286 ms, Full Res ~612 ms.
 - Both engines apply ImageNet normalization to RGB inputs (mean
   `[0.485, 0.456, 0.406]`, std `[0.229, 0.224, 0.225]`). Skipping this
   is what produces washed-out / "milky" foreground output — the Hiera
