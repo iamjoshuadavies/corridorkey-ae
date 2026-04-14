@@ -546,6 +546,25 @@ A_Err SmartRender(
                     "Ready  |  %.0fms  |  %dx%d  |  %dbpc",
                     ms, request.width, request.height, bpp * 2);
             }
+        } else if (response.loading) {
+            // Runtime is alive but engine is still loading (download +
+            // warmup on first run). Show a friendly status line and
+            // pass the input through unmodified.
+            g_status.bridge_connected = true;
+            const char* detail = response.loading_detail.empty()
+                ? "Starting up" : response.loading_detail.c_str();
+            snprintf(g_status.status_text, sizeof(g_status.status_text),
+                     "Loading model (%s)...", detail);
+            if (input_world->width == output_world->width &&
+                input_world->height == output_world->height) {
+                for (int y = 0; y < output_world->height; y++) {
+                    memcpy(
+                        reinterpret_cast<char*>(output_world->data) + y * output_world->rowbytes,
+                        reinterpret_cast<char*>(input_world->data) + y * input_world->rowbytes,
+                        output_world->rowbytes
+                    );
+                }
+            }
         } else {
             g_status.bridge_connected = true;
             snprintf(g_status.status_text, sizeof(g_status.status_text), "Bridge error");

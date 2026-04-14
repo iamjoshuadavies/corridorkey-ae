@@ -690,6 +690,18 @@ bool RuntimeBridge::ProcessFrame(const FrameRequest& request, FrameResponse& res
     // Parse response: "FRAME" (5) + width(4) + height(4) + rowbytes(4) + pixel_data
     const size_t resp_header_size = 5 + 4 + 4 + 4; // 17 bytes
     if (resp_data.size() < resp_header_size || memcmp(resp_data.data(), "FRAME", 5) != 0) {
+        // LOADING<detail> — engine is still loading (first-run download
+        // + warmup). Not an error; tell the caller to render pass-through
+        // with a "Loading model..." status line.
+        if (resp_data.size() >= 7 && memcmp(resp_data.data(), "LOADING", 7) == 0) {
+            response.success = false;
+            response.loading = true;
+            response.loading_detail = std::string(
+                reinterpret_cast<char*>(resp_data.data()) + 7,
+                resp_data.size() - 7
+            );
+            return false;
+        }
         if (resp_data.size() > 5 && memcmp(resp_data.data(), "ERROR", 5) == 0) {
             response.success = false;
             response.error_message = std::string(

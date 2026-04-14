@@ -10,6 +10,7 @@ import logging
 import signal
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 from engines.base import InferenceEngine
@@ -104,21 +105,45 @@ def main() -> None:
     hw_info = detect_hardware()
     logger.info("Hardware: %s", hw_info)
 
-    # Initialize inference engine
-    engine = create_engine(model_path=args.model, tile_size=args.tile_size)
-
-    # Create and start IPC server with engine
+    # Create the handler in "loading" state. The IPC server binds and starts
+    # accepting connections IMMEDIATELY so the AE plugin can connect and see
+    # a meaningful status while the engine is still loading (which can take
+    # ~10 s on a fresh install due to the weight download).
     from server.handler import RequestHandler
-    handler = RequestHandler(engine=engine)
+    handler = RequestHandler(engine=None)
+    handler.set_engine_state("loading", "Starting up")
 
     server = IPCServer(port=args.port, socket_path=args.socket)
-    server._handler = handler  # Inject the handler with engine
+    server._handler = handler  # Inject the handler
+
+    # Load the inference engine in a background thread. The handler will
+    # respond to FRAME messages with a LOADING error until engine_state is
+    # "ready".
+    _engine_slot: dict[str, InferenceEngine | None] = {"engine": None}
+
+    def _load_engine_bg() -> None:
+        try:
+            handler.set_engine_state("loading", "Loading engine")
+            eng = create_engine(model_path=args.model, tile_size=args.tile_size)
+            _engine_slot["engine"] = eng
+            if eng is not None:
+                handler.attach_engine(eng)
+                logger.info("Engine load complete — runtime ready")
+            else:
+                handler.set_engine_state("error", "No engine available")
+        except Exception as e:
+            logger.exception("Engine load thread crashed")
+            handler.set_engine_state("error", str(e))
+
+    engine_thread = threading.Thread(target=_load_engine_bg, daemon=True, name="ck-engine-load")
+    engine_thread.start()
 
     # Graceful shutdown on signals
     def handle_signal(sig: int, frame: object) -> None:
         logger.info("Received signal %d, shutting down...", sig)
-        if engine:
-            engine.unload()
+        eng = _engine_slot["engine"]
+        if eng is not None:
+            eng.unload()
         server.stop()
         sys.exit(0)
 

@@ -101,6 +101,14 @@ struct FrameResponse {
     std::vector<uint8_t> pixel_data;    // ARGB 8bpc
     bool success = false;
     std::string error_message;
+
+    // Set to true by ProcessFrame when the runtime returned a LOADING
+    // response instead of a keyed frame — the engine is still loading
+    // (first-run download + warmup). The render path should show a
+    // "Loading model..." status and pass the input through unmodified,
+    // rather than treating this as a bridge error.
+    bool loading = false;
+    std::string loading_detail;
 };
 
 struct RuntimeStatus {

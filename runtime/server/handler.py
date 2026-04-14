@@ -172,6 +172,29 @@ class RequestHandler:
         self._engine = engine
         self._last_inference_ms: float = 0
         self._cache = FrameCache()
+        # Engine lifecycle tracking — used by the bg loader in main.py so
+        # the plugin can show "Loading model..." feedback during first-run
+        # startup instead of a silent freeze.
+        #   state ∈ {"loading", "ready", "error"}
+        # Defaults to "ready" so a handler constructed without any engine
+        # (e.g. in tests) still falls through to the text-overlay mock
+        # instead of replying LOADING forever. main.py explicitly calls
+        # set_engine_state("loading", ...) when it wants the real gating.
+        self._engine_state: str = "ready"
+        self._engine_detail: str = ""
+
+    def set_engine_state(self, state: str, detail: str = "") -> None:
+        """Update the engine lifecycle state (called by the main.py loader)."""
+        self._engine_state = state
+        self._engine_detail = detail
+        logger.info("Engine state: %s (%s)", state, detail)
+
+    def attach_engine(self, engine: InferenceEngine) -> None:
+        """Called by the main.py loader once the engine finishes initializing."""
+        self._engine = engine
+        self._engine_state = "ready"
+        self._engine_detail = ""
+        logger.info("Engine attached and ready")
 
     def handle_raw(self, data: bytes) -> bytes:
         """Handle a raw message (bytes). Detect format and dispatch."""
@@ -214,7 +237,8 @@ class RequestHandler:
         return {
             "type": "status",
             "device": self._hw_info,
-            "model_state": "ready" if engine_ready else "not_loaded",
+            "model_state": self._engine_state,
+            "model_detail": self._engine_detail,
             "warmup_complete": engine_ready,
             "frames_processed": self._frame_count,
             "last_inference_ms": self._last_inference_ms,
@@ -227,6 +251,14 @@ class RequestHandler:
 
     def _handle_frame_binary(self, data: bytes) -> bytes:
         """Process a binary FRAME message through inference or fallback."""
+
+        # Short-circuit if the engine is still loading. We reply with a
+        # LOADING:<detail> error that the C++ bridge turns into a friendly
+        # status line + pass-through render, instead of freezing AE while
+        # the background load thread works.
+        if self._engine_state != "ready":
+            detail = self._engine_detail or self._engine_state
+            return b"LOADING" + detail.encode("utf-8")
 
         # Parse header — detect if it's the extended format (with params) or legacy
         width = struct.unpack(">I", data[5:9])[0]
