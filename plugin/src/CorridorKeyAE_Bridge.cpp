@@ -249,6 +249,14 @@ struct RuntimeBridge::Impl {
 
 #ifdef _WIN32
     HANDLE win_proc = NULL;     // Child runtime process handle
+    // Job object: every spawned runtime process (and any descendants,
+    // like the venv launcher -> real python.exe chain) gets assigned to
+    // this job. The job is created with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    // so when we close the handle — on Shutdown() or when the DLL unloads
+    // — Windows guarantees the entire subtree is terminated. Without this,
+    // TerminateProcess on just the launcher handle leaves the real python
+    // orphaned and you accumulate abandoned runtimes over time.
+    HANDLE win_job = NULL;
 #endif
 
     // Thread safety: MFR calls render from multiple threads
@@ -521,19 +529,43 @@ struct RuntimeBridge::Impl {
         si.dwFlags     = STARTF_USESHOWWINDOW;
         si.wShowWindow = SW_HIDE;
 
+        // Create a Job Object to contain the runtime + every process it
+        // spawns (the venv python.exe launcher re-execs the real system
+        // python, which would otherwise survive as an orphan when we
+        // terminate the launcher). When win_job is closed — in Shutdown()
+        // or automatically on DLL unload — Windows kills everything in it.
+        if (win_job == NULL) {
+            win_job = CreateJobObjectW(nullptr, nullptr);
+            if (win_job != NULL) {
+                JOBOBJECT_EXTENDED_LIMIT_INFORMATION info{};
+                info.BasicLimitInformation.LimitFlags =
+                    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                SetInformationJobObject(
+                    win_job, JobObjectExtendedLimitInformation,
+                    &info, sizeof(info));
+            }
+        }
+
         PROCESS_INFORMATION pi{};
+        // CREATE_SUSPENDED: don't let the child start executing until
+        // after we've assigned it to the Job Object. Otherwise a child
+        // that respawns fast could sneak out of the job tree.
         BOOL ok = CreateProcessW(
             nullptr,                // lpApplicationName
             wcmd.data(),            // lpCommandLine (writable)
             nullptr, nullptr,
             FALSE,                  // bInheritHandles — none
-            CREATE_NO_WINDOW,
+            CREATE_NO_WINDOW | CREATE_SUSPENDED,
             nullptr,                // lpEnvironment (inherit)
             wcwd.empty() ? nullptr : wcwd.c_str(),
             &si, &pi);
 
         if (!ok) return false;
 
+        if (win_job != NULL) {
+            AssignProcessToJobObject(win_job, pi.hProcess);
+        }
+        ResumeThread(pi.hThread);
         CloseHandle(pi.hThread);
         win_proc  = pi.hProcess;
         child_pid = 1; // launched-flag for the cross-platform code below
@@ -829,14 +861,20 @@ void RuntimeBridge::Shutdown()
 
 #ifdef _WIN32
     if (m_impl->win_proc) {
-        // Give the runtime ~500ms to exit cleanly after the JSON shutdown
-        // we sent above; if it doesn't, kill it.
-        if (WaitForSingleObject(m_impl->win_proc, 500) != WAIT_OBJECT_0) {
-            TerminateProcess(m_impl->win_proc, 1);
-            WaitForSingleObject(m_impl->win_proc, 1000);
-        }
+        // Give the runtime ~500 ms to exit cleanly after the JSON shutdown
+        // we sent above. If it's still alive, we fall through to closing
+        // the Job Object below, which kills the whole process tree
+        // (launcher + real python) atomically via
+        // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. Terminating only the
+        // launcher handle would leave the real python orphaned, which is
+        // how we were accumulating zombie runtimes.
+        WaitForSingleObject(m_impl->win_proc, 500);
         CloseHandle(m_impl->win_proc);
         m_impl->win_proc = NULL;
+    }
+    if (m_impl->win_job) {
+        CloseHandle(m_impl->win_job);   // triggers KILL_ON_JOB_CLOSE
+        m_impl->win_job = NULL;
     }
     m_impl->child_pid = -1;
 #else

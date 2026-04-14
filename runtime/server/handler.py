@@ -246,7 +246,23 @@ class RequestHandler:
         }
 
     def _handle_shutdown(self, msg: dict[str, Any]) -> dict[str, Any]:
-        logger.info("Shutdown requested by plugin")
+        """Graceful exit. Plugin calls this when AE is closing / reloading.
+
+        We ack immediately, then schedule an os._exit() from a background
+        thread so the ack actually makes it over the wire before we go.
+        os._exit skips atexit handlers, but we only use atexit to unlink
+        the port file — the OS reclaims TCP sockets and heap on exit.
+        """
+        import os as _os
+        import threading as _threading
+        logger.info("Shutdown requested by plugin — exiting")
+
+        def _delayed_exit() -> None:
+            import time as _time
+            _time.sleep(0.1)  # ensure the ack is flushed
+            _os._exit(0)
+
+        _threading.Thread(target=_delayed_exit, daemon=True).start()
         return {"type": "shutdown_ack"}
 
     def _handle_frame_binary(self, data: bytes) -> bytes:
