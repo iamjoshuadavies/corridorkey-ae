@@ -153,12 +153,24 @@ jobs:
           Get-Item "${{ matrix.plugin-path }}" | Format-List
 
       # --- Upload as artifact (available from the Actions tab) -----------------
+      # On macOS we zip the .plugin bundle ourselves before upload so the
+      # bundle directory name is preserved. If we upload the .plugin directory
+      # directly, actions/upload-artifact flattens the top-level wrapper name
+      # and consumers (the installer job) lose the "CorridorKey.plugin"
+      # grouping. A zip round-trip keeps the bundle intact and downloads
+      # deterministically.
+      - name: Zip plugin bundle for upload (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd build/plugin
+          zip -qry CorridorKey-plugin.zip CorridorKey.plugin
+
       - name: Upload plugin artifact (macOS)
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.plugin-path }}
+          path: build/plugin/CorridorKey-plugin.zip
           retention-days: 30
 
       - name: Upload plugin artifact (Windows)
@@ -167,4 +179,63 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.plugin-path }}
+          retention-days: 30
+
+  # =============================================================================
+  # macOS installer — produces a shippable .pkg from the plugin artifact.
+  # =============================================================================
+  installer-macos:
+    name: Installer (macOS .pkg)
+    runs-on: macos-latest
+    needs: plugin-build
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Download the plugin artifact built by plugin-build -----------------
+      # The macOS plugin-build zips CorridorKey.plugin into CorridorKey-plugin.zip
+      # before upload so the .plugin bundle wrapper is preserved across the
+      # actions/upload+download round-trip. Unzip it where build_macos.sh
+      # expects: build/plugin/CorridorKey.plugin/
+      - name: Download plugin artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: CorridorKey-macOS
+          path: artifact
+
+      - name: Unpack plugin bundle into build dir
+        run: |
+          mkdir -p build/plugin
+          unzip -q artifact/CorridorKey-plugin.zip -d build/plugin
+          test -d build/plugin/CorridorKey.plugin/Contents/MacOS
+          file build/plugin/CorridorKey.plugin/Contents/MacOS/CorridorKey
+
+      # --- Build the .pkg via our local script --------------------------------
+      # scripts/installer/build_macos.sh is designed to work identically on
+      # the CI runner and locally — it downloads python-build-standalone,
+      # stages the payload, runs pkgbuild + productbuild, and drops the
+      # result in dist/. No CI-specific logic inside the script itself.
+      - name: Build .pkg installer
+        run: |
+          chmod +x scripts/installer/build_macos.sh installer/macos/scripts/postinstall
+          ./scripts/installer/build_macos.sh --version 0.1.0-${GITHUB_SHA::7}
+
+      - name: Verify .pkg
+        run: |
+          PKG=$(ls dist/CorridorKey-*.pkg | head -1)
+          echo "Built: $PKG"
+          ls -la "$PKG"
+          # Expand to inspect structure without installing
+          pkgutil --expand "$PKG" /tmp/pkg-inspect
+          echo "--- Distribution file ---"
+          head -30 /tmp/pkg-inspect/Distribution
+          echo "--- Component payload (first 20 entries) ---"
+          lsbom /tmp/pkg-inspect/CorridorKey-component.pkg/Bom 2>/dev/null | head -20 || true
+          echo "--- Postinstall script first 5 lines ---"
+          head -5 /tmp/pkg-inspect/CorridorKey-component.pkg/Scripts/postinstall
+
+      - name: Upload .pkg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CorridorKey-Installer-macOS
+          path: dist/CorridorKey-*.pkg
           retention-days: 30
