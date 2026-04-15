@@ -1,0 +1,112 @@
+name: Bug report
+description: Something is broken or behaving unexpectedly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please fill out as much of the
+        form as you can — the more context, the faster we can fix it.
+
+        **Security issues:** please do NOT report them here. Use
+        [private vulnerability reporting](https://github.com/iamjoshuadavies/corridorkey-ae/security/advisories/new)
+        instead.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear, concise description of the bug.
+      placeholder: |
+        When I apply CorridorKey to a 4K layer at Full Res quality, the effect panel
+        shows "Bridge error" and the output is all black.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Minimal, numbered steps that reliably trigger the bug.
+      placeholder: |
+        1. New comp, 3840x2160, 24fps
+        2. Import any green-screen footage
+        3. Effect → Keying → CorridorKey
+        4. Set Quality to Full Res
+        5. Scrub to frame 10
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS (Apple Silicon)
+        - Windows (x64, NVIDIA)
+        - Other / unsure
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+      placeholder: "e.g. macOS 15.1, Windows 11 24H2"
+    validations:
+      required: true
+
+  - type: input
+    id: ae-version
+    attributes:
+      label: After Effects version
+      placeholder: "e.g. 2026 (26.0.0), 2025 (25.3.0)"
+    validations:
+      required: true
+
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU (Windows) or chip (macOS)
+      placeholder: "e.g. RTX 4090, M5 Pro, M2 Max"
+    validations:
+      required: true
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: CorridorKey AE version
+      description: "Find this in Effect → About CorridorKey, or in the installer filename."
+      placeholder: "e.g. 0.1.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: runtime-log
+    attributes:
+      label: Runtime log
+      description: |
+        The runtime writes a fresh log each launch. Please paste the contents
+        (or the relevant tail) — redact anything sensitive first.
+
+        - **macOS:** `~/Library/Logs/CorridorKey-runtime.log`
+        - **Windows:** `%TEMP%\corridorkey_runtime.log`
+      render: text
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Anything else?
+      description: Screenshots, screen recordings, sample project files, etc.
