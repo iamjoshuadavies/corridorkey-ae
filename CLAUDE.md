@@ -65,9 +65,13 @@ Program Files must be run by the user from an admin shell.
 
 ## Installers (feature/installers branch — WIP, issue #28)
 
-**Status:** macOS `.pkg` is done end-to-end (Phases 1–3 of #28). Windows
-`.exe` is next (Phases 4–5). Work lives on the `feature/installers`
-branch, not yet merged to main.
+**Status:** Both platforms done end-to-end. macOS `.pkg` via
+`pkgbuild`/`productbuild`, Windows `.exe` via InnoSetup 6. Both build
+from the same plugin artifact in CI, both ship
+python-build-standalone + runtime source + requirements and create
+the venv on the user's machine at install time. Work lives on the
+`feature/installers` branch, not yet merged to main — waiting until
+both platforms are verified in the wild.
 
 ### Done (macOS)
 - `scripts/installer/build_macos.sh` — stages `python-build-standalone`
@@ -131,48 +135,107 @@ branch, not yet merged to main.
    trailing integer, pick highest.** The same bash logic translates
    directly to Pascal in InnoSetup's `[Code]` section.
 
-### Windows (next — Phases 4+5 of #28)
-**Phase 4 — local PoC (do this first on the Windows machine).**
-Hand-craft an install tree at `%LOCALAPPDATA%\CorridorKey\`:
-```
-%LOCALAPPDATA%\CorridorKey\
-├── python\                 <- python-build-standalone 3.12 x86_64-pc-windows-msvc
-│   └── python.exe
-├── runtime\
-│   ├── .venv\              <- created at install time from the embedded python
-│   │   └── Scripts\python.exe
-│   ├── server\
-│   ├── engines\
-│   └── models\
-├── plugin\
-│   └── CorridorKey.aex
-├── installer\
-│   └── requirements.txt
-└── VERSION
-```
-The bridge already checks `%LOCALAPPDATA%\CorridorKey` before
-`%ProgramFiles%\CorridorKey` — see `FindRepoRoot()`. Verify:
-1. Delete `CORRIDORKEY_REPO_ROOT` env var (or unset for the test shell).
-2. Extract `python-build-standalone` 3.12 windows x64 `install_only` tarball into `%LOCALAPPDATA%\CorridorKey\python\`.
-3. Copy `runtime\{server,engines,models}` + `pyproject.toml` to `%LOCALAPPDATA%\CorridorKey\runtime\`.
-4. Run `%LOCALAPPDATA%\CorridorKey\python\python.exe -m venv %LOCALAPPDATA%\CorridorKey\runtime\.venv`.
-5. `pip install` the Windows requirements (msgpack numpy Pillow opencv-python-headless timm safetensors + torch CUDA).
-6. Copy the built `CorridorKey.aex` to `C:\Users\<user>\AppData\Roaming\Adobe\After Effects\26.0\Plug-ins\` (per-user AE plug-ins folder — no admin needed) or to `Program Files` if you're testing admin flow.
-7. Launch AE, apply CorridorKey, confirm the runtime launches from
-   the per-user install (not from `CORRIDORKEY_REPO_ROOT`).
+### Done (Windows)
+- `scripts/installer/build_windows.ps1` — orchestrator, mirror of
+  `build_macos.sh`. Downloads `python-build-standalone` 3.12.13
+  `x86_64-pc-windows-msvc` into `.build-cache/`, stages the tree
+  (embedded Python + runtime source + plugin .aex + requirements +
+  VERSION) at `build/installer-windows/staging/`, invokes
+  `ISCC.exe` with `/DAppVersion`, `/DStagingDir`, `/DPluginAex`, drops
+  a ~27 MB `CorridorKey-<ver>-windows-x64.exe` in `dist/`. Uses the
+  explicit Windows `tar.exe` at `$env:SystemRoot\System32\tar.exe`
+  because Git Bash / MSYS ship a GNU tar on `PATH` that tries to
+  parse `C:\...` as a remote host and fails with `Cannot connect
+  to C`.
+- `installer/windows/CorridorKey.iss` — InnoSetup 6 script.
+  `PrivilegesRequired=admin` (Plugin Loading.log confirms AE Windows
+  only scans `C:\Program Files\Adobe\Adobe After Effects *\Support
+  Files\...` — no per-user Plug-ins folder gets scanned, so a no-UAC
+  install isn't possible). `DefaultDirName={autopf}\CorridorKey`
+  (= `C:\Program Files\CorridorKey\`). `[Files]` bundles staged tree,
+  `[Run]` creates the venv and pip-installs base deps + CUDA torch
+  at install time (torch is the slow step, ~5 min over 50 Mbps
+  because of the 2 GB cu121 wheels). `[Code]`
+  `FindHighestAEPluginsDir` mirrors the bash idiom from the macOS
+  postinstall (enumerate `Program Files\Adobe\Adobe After Effects *`,
+  extract trailing integer, pick highest) and `CopyFile`s the .aex in
+  during `ssPostInstall`. `RemovePluginFromAllAEInstalls` runs on
+  uninstall. `[UninstallDelete]` nukes the install-time-created .venv
+  + the install root (InnoSetup doesn't track files created by
+  `[Run]` steps, so we explicitly tell it what to remove).
+  AppId `{{B3D9C2A7-E5F1-4A8B-9C2D-CORRIDORKEY01}}` pinned for
+  upgrade-in-place recognition.
+- `installer/windows/requirements.txt` — base deps: msgpack, numpy,
+  Pillow, opencv-python-headless, timm, safetensors.
+- `installer/windows/requirements-torch.txt` — pinned CUDA wheels
+  (`torch==2.5.1+cu121`, `torchvision==0.20.1+cu121`) with
+  `--index-url https://download.pytorch.org/whl/cu121` inside the
+  file so pip uses ONLY that index for these two packages.
+- `plugin/src/CorridorKeyAE_Bridge.cpp` — `FindRepoRoot()` already
+  checked `%ProgramFiles%\CorridorKey` before the installer work,
+  so no bridge changes were needed on the Windows side.
+- CI: `installer-windows` job in `.github/workflows/ci.yml` runs on
+  `windows-latest`, `needs: plugin-build`, downloads the
+  `CorridorKey-Windows` artifact (raw `.aex`, no zip-wrap needed
+  because `.aex` is a single file not a bundle), installs InnoSetup
+  6 via pre-installed Chocolatey, runs `build_windows.ps1`, verifies
+  the output is a valid PE (MZ header) ≥ 1 MB, uploads
+  `CorridorKey-Installer-Windows` artifact. Build takes ~100 s —
+  fast because all of the slow stuff (PyTorch CUDA wheel downloads)
+  happens at install time on the user's machine, not at build time.
+- `scripts/installer/clean_and_test_windows.ps1` — mirror of
+  `clean_and_test_macos.sh`. Bails if AE is running or the shell
+  isn't elevated. Kills stray runtime processes, removes `.aex`
+  from every AE install, runs any existing `unins000.exe` then
+  force-removes `%ProgramFiles%\CorridorKey\`, cleans the Phase 4
+  dev tree at `%LOCALAPPDATA%\CorridorKey\` while preserving the
+  models cache by default (`-KeepModelCache` switch), cleans temp
+  files + orphaned InnoSetup registry receipts, warns about
+  `CORRIDORKEY_REPO_ROOT` user env var. Installs via
+  `-ExePath`, `-FromCi` / `-RunId`, or falls back to the latest
+  local build in `dist/`. Verifies the install tree + plugin drop
+  + venv imports including `torch.cuda.is_available()`.
+- **Verified:** user ran clean-and-test harness, installer picked
+  up the local build, placed `%ProgramFiles%\CorridorKey\` with
+  the venv + cu121 torch + CUDA import check passing, dropped
+  `CorridorKey.aex` into AE 2026, keying worked end-to-end.
+  CI first-run on `feature/installers`: 7/7 jobs green.
 
-Once Phase 4 proves the layout works, Phase 5 is writing the
-InnoSetup `.iss` script that does the same thing under the hood and
-wiring it into CI.
-
-**Open question on Windows plugin drop location:** per-user install is
-the plan, but `%APPDATA%\Adobe\After Effects\<version>\Plug-ins\` is
-per-user and `%ProgramFiles%\Adobe\Adobe After Effects <ver>\Support Files\Plug-ins\Effects\` is machine-wide-needs-admin. Check AE's
-Plugin Loading.log on Windows to see which paths it actually scans
-before committing — it may only scan `Program Files` by default and
-not touch the `%APPDATA%` per-user folder, in which case we need
-`PrivilegesRequired=admin` after all and the per-user-ness of the
-install only applies to the `%LOCALAPPDATA%\CorridorKey` runtime tree.
+### Key Windows learnings (on top of the shared macOS ones)
+1. **AE on Windows doesn't scan a per-user plug-ins folder.**
+   `%AppData%\Adobe\After Effects\<ver>\Plug-ins\` is NOT one of the
+   paths AE scans at startup — confirmed by reading
+   `%AppData%\Adobe\After Effects\26.0\Plugin Loading.log`. Only
+   `C:\Program Files\Adobe\Adobe After Effects *\Support Files\...`
+   paths get scanned. This means `PrivilegesRequired=admin` is
+   unavoidable on Windows just as `localSystem` is on macOS.
+2. **Don't pre-bake the venv on the CI runner.** Same lesson as
+   macOS: venvs bake absolute paths into `pyvenv.cfg` and launchers,
+   which break the moment the installer leaves the build machine.
+   Install time venv creation is the bulletproof pattern.
+3. **Use the explicit Windows `tar.exe` by full path** in the
+   build script. PowerShell's `tar.exe` resolves via `PATH`, which
+   on a dev machine with Git Bash / MSYS installed picks up GNU
+   tar. GNU tar interprets `C:\path` as a remote `host:path` and
+   fails with `Cannot connect to C`. The Win10+ bundled BSD tar
+   lives at `$env:SystemRoot\System32\tar.exe` and handles
+   `.tar.gz` + Windows paths natively.
+4. **The Windows plugin-build artifact doesn't need zip-wrapping**
+   the way macOS does — `.aex` is a single file, not a directory
+   bundle, so `actions/upload-artifact`'s single-dir-parent
+   flattening isn't a problem.
+5. **InnoSetup's `[Run]` steps are NOT tracked for uninstall.**
+   The venv we create via `python -m venv` at install time doesn't
+   get auto-removed by the uninstaller. Have to explicitly list
+   `Type: filesandordirs; Name: "{app}\runtime\.venv"` under
+   `[UninstallDelete]` so it gets nuked on uninstall.
+6. **InnoSetup renamed `FileCopy` → `CopyFile`** in a recent
+   version. Using `FileCopy` still compiles but emits a
+   `[Hint]` warning. Use `CopyFile` directly.
+7. **Windows PowerShell 5 (pre-Core) is picky about Unicode in
+   scripts without a UTF-8 BOM.** Em-dashes and smart quotes in
+   `Write-Host` strings will throw `Missing closing ')'` parse
+   errors. Keep `.ps1` files ASCII-only or save them with a BOM.
 
 ### Architectural non-goals for installers (don't re-litigate)
 - **Signing / notarization** — deferred. Needs an Apple Developer ID
