@@ -233,26 +233,23 @@ takes care of everything.
 
 ### Downloading the installer
 
-There are no proper GitHub Releases yet — builds come from CI. Grab the
-latest green run from the [**Actions tab**](https://github.com/iamjoshuadavies/corridorkey-ae/actions/workflows/ci.yml)
-and download whichever artifact matches your platform:
+**Tagged releases** live on the [**Releases**](https://github.com/iamjoshuadavies/corridorkey-ae/releases)
+page — each release bundles both installers plus SHA-256 checksums.
+Grab the file that matches your platform from the latest release:
 
-| Platform | Artifact | File |
-|---|---|---|
-| macOS  | `CorridorKey-Installer-macOS`    | `CorridorKey-<ver>-macOS-arm64.pkg` |
-| Windows | `CorridorKey-Installer-Windows` | `CorridorKey-<ver>-windows-x64.exe` |
+| Platform | File |
+|---|---|
+| macOS (Apple Silicon) | `CorridorKey-<ver>-macOS-arm64.pkg` |
+| Windows (x64, NVIDIA) | `CorridorKey-<ver>-windows-x64.exe` |
 
-1. Open the linked workflow page.
-2. Click the most recent run with a green checkmark next to **CI**.
-3. Scroll to the **Artifacts** section at the bottom.
-4. Click the platform artifact — GitHub downloads it as a `.zip`.
-5. Unzip it. Inside is the actual `.pkg` / `.exe`.
-
-(If you're not signed in to GitHub, the Artifacts section won't show —
-sign in and refresh.)
-
-Proper GitHub Releases with checksums will land when the installers
-get signed + notarized.
+**Daily builds from `main`** are also available as CI artifacts on the
+[Actions tab](https://github.com/iamjoshuadavies/corridorkey-ae/actions/workflows/ci.yml)
+if you want the bleeding edge between releases. Open the most recent
+green run and grab `CorridorKey-Installer-macOS` or
+`CorridorKey-Installer-Windows` from the **Artifacts** section at the
+bottom (GitHub serves these as `.zip`s — unzip to get the real
+`.pkg` / `.exe`). Artifact downloads require you to be signed in to
+GitHub.
 
 ### macOS install
 
@@ -372,8 +369,6 @@ See [open issues](https://github.com/iamjoshuadavies/corridorkey-ae/issues) for 
       workaround on macOS and the SmartScreen warning on Windows.
       Needs an Apple Developer ID ($99/yr) and a Windows EV code
       signing cert ($100–300/yr).
-- [ ] **Proper GitHub Releases** with checksums and a versioned
-      changelog, so users don't have to dig through CI artifacts.
 - [ ] **Float32 pipeline** (#10) — skip uint8 quantization for 32bpc projects.
 
 ## Credits

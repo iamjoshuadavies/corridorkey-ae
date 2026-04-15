@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']            # Pushing a v* tag cuts a GitHub Release (see release job)
   pull_request:
     branches: [main]
   workflow_dispatch:        # Allow manual runs from the Actions tab
@@ -21,6 +22,38 @@ env:
   AE_SDK_ASSET_NAME: ae-sdk-minimal.zip
 
 jobs:
+  # =============================================================================
+  # Version resolution — computes a single version string that every
+  # downstream build job uses, so the macOS .pkg, the Windows .exe, and
+  # the GitHub Release (when cut via a v* tag) all agree.
+  #
+  #   Tag push   (refs/tags/vX.Y.Z)  ->  X.Y.Z       (for cutting releases)
+  #   Anything else                  ->  0.1.0-<sha7>  (daily CI)
+  #
+  # Also exposes `is_release` so the release job can gate on it.
+  # =============================================================================
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.compute.outputs.version }}
+      is_release: ${{ steps.compute.outputs.is_release }}
+    steps:
+      - name: Compute version
+        id: compute
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.1.0-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Version: $(grep '^version=' "$GITHUB_OUTPUT" | cut -d= -f2)"
+          echo "Is release: $(grep '^is_release=' "$GITHUB_OUTPUT" | cut -d= -f2)"
+
   # =============================================================================
   # Python runtime — lint, type-check, tests on Linux
   # =============================================================================
@@ -187,7 +220,7 @@ jobs:
   installer-macos:
     name: Installer (macOS .pkg)
     runs-on: macos-latest
-    needs: plugin-build
+    needs: [version, plugin-build]
     steps:
       - uses: actions/checkout@v4
 
@@ -217,7 +250,7 @@ jobs:
       - name: Build .pkg installer
         run: |
           chmod +x scripts/installer/build_macos.sh installer/macos/scripts/postinstall
-          ./scripts/installer/build_macos.sh --version 0.1.0-${GITHUB_SHA::7}
+          ./scripts/installer/build_macos.sh --version "${{ needs.version.outputs.version }}"
 
       - name: Verify .pkg
         run: |
@@ -246,7 +279,7 @@ jobs:
   installer-windows:
     name: Installer (Windows .exe)
     runs-on: windows-latest
-    needs: plugin-build
+    needs: [version, plugin-build]
     steps:
       - uses: actions/checkout@v4
 
@@ -293,8 +326,7 @@ jobs:
       - name: Build .exe installer
         shell: pwsh
         run: |
-          $sha = "${{ github.sha }}".Substring(0,7)
-          ./scripts/installer/build_windows.ps1 -Version "0.1.0-$sha"
+          ./scripts/installer/build_windows.ps1 -Version "${{ needs.version.outputs.version }}"
 
       - name: Verify .exe
         shell: pwsh
@@ -323,3 +355,90 @@ jobs:
           name: CorridorKey-Installer-Windows
           path: dist/CorridorKey-*-windows-x64.exe
           retention-days: 30
+
+  # =============================================================================
+  # Release — publishes the installers to a GitHub Release. Only runs when
+  # CI was triggered by a v* tag push (e.g. `git tag v0.1.0 && git push
+  # origin v0.1.0`). Daily main-branch pushes don't cut releases.
+  #
+  # Everything else already built the right assets with the tag version
+  # string baked in, so this job just downloads both installer artifacts,
+  # generates sha256 checksums, and hands the bundle to
+  # softprops/action-gh-release which creates (or updates) the release
+  # with auto-generated release notes from the commit diff since the
+  # previous tag.
+  # =============================================================================
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [version, installer-macos, installer-windows]
+    # Gate on an actual tag push. This keeps the job out of the daily
+    # CI graph entirely on non-release runs.
+    if: needs.version.outputs.is_release == 'true'
+    permissions:
+      contents: write         # required to create/update Releases
+    steps:
+      - name: Download macOS installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: CorridorKey-Installer-macOS
+          path: release-assets
+
+      - name: Download Windows installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: CorridorKey-Installer-Windows
+          path: release-assets
+
+      - name: List release assets
+        run: |
+          ls -la release-assets/
+          echo "--- file types ---"
+          file release-assets/* || true
+
+      - name: Generate SHA-256 checksums
+        working-directory: release-assets
+        run: |
+          for f in CorridorKey-*.pkg CorridorKey-*.exe; do
+            if [ -f "$f" ]; then
+              sha256sum "$f" > "$f.sha256"
+              echo "== $f.sha256 =="
+              cat "$f.sha256"
+            fi
+          done
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # The tag that triggered this run - e.g. refs/tags/v0.1.0 -> v0.1.0
+          tag_name: ${{ github.ref_name }}
+          name: CorridorKey ${{ github.ref_name }}
+          # softprops auto-detects "-rc" / "-alpha" / "-beta" in the tag and
+          # marks the release as a prerelease. Explicit flag here as a
+          # safety net in case the auto-detect logic changes.
+          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') }}
+          # Auto-populate release notes from the commit diff since the
+          # previous release tag. You can still edit them in the UI after
+          # publishing - this just gives you a starting point.
+          generate_release_notes: true
+          body: |
+            ## CorridorKey ${{ github.ref_name }}
+
+            Download the installer for your platform below. See
+            [Installation](https://github.com/iamjoshuadavies/corridorkey-ae#installation)
+            in the README for the Gatekeeper (macOS) and SmartScreen
+            (Windows) unblock steps - these installers are not yet signed.
+
+            | Platform | File | SHA-256 |
+            |---|---|---|
+            | macOS (Apple Silicon) | `CorridorKey-${{ needs.version.outputs.version }}-macOS-arm64.pkg` | see `.sha256` |
+            | Windows (x64, NVIDIA) | `CorridorKey-${{ needs.version.outputs.version }}-windows-x64.exe` | see `.sha256` |
+
+            Model weights (~398 MB) download on first frame from the
+            upstream [corridorkey-mlx](https://github.com/nikopueringer/corridorkey-mlx)
+            release.
+          files: |
+            release-assets/CorridorKey-*.pkg
+            release-assets/CorridorKey-*.exe
+            release-assets/*.sha256
+          fail_on_unmatched_files: true

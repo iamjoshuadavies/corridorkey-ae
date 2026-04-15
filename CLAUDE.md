@@ -237,6 +237,48 @@ both platforms are verified in the wild.
    `Write-Host` strings will throw `Missing closing ')'` parse
    errors. Keep `.ps1` files ASCII-only or save them with a BOM.
 
+### Cutting a GitHub Release
+
+CI publishes a real GitHub Release whenever a `v*` tag is pushed.
+The full flow is:
+
+```bash
+# From main, at the commit you want to ship.
+git checkout main
+git pull
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+That's it. The `version` job in `.github/workflows/ci.yml` detects
+the tag ref (`refs/tags/v0.1.0`), strips the leading `v`, and passes
+`0.1.0` to `build_macos.sh --version` / `build_windows.ps1 -Version`
+so the artifact filenames bake the clean semver in. After both
+`installer-macos` and `installer-windows` pass, the `release` job
+(gated on `needs.version.outputs.is_release == 'true'`) downloads
+both installer artifacts, generates `sha256sum` files alongside each
+installer, and hands the bundle to `softprops/action-gh-release@v2`
+which creates a GitHub Release named `CorridorKey v0.1.0` with the
+installers + checksums attached and auto-generated release notes
+(diff since the previous tag, or the full commit log for the first
+tag).
+
+Prerelease tags (`v0.2.0-rc1`, `v0.2.0-alpha1`, `v0.2.0-beta2`) are
+auto-flagged as prereleases by `softprops/action-gh-release` — no
+manual flag needed.
+
+Non-tag CI runs (daily pushes to `main`, PRs) still build both
+installers and upload them as workflow artifacts with the
+`0.1.0-<sha7>` version format, same as before. The release job
+doesn't run on those — the `if: needs.version.outputs.is_release ==
+'true'` gate keeps it out of the graph entirely.
+
+If a tag build goes wrong and you need to re-cut the same version:
+delete the tag (both locally and on the remote), delete the release
+on GitHub, fix the problem, push a new tag with the same name. The
+`softprops` action uses `create_or_update` semantics so re-running
+the workflow against a cleaned-up tag produces a fresh release.
+
 ### Architectural non-goals for installers (don't re-litigate)
 - **Signing / notarization** — deferred. Needs an Apple Developer ID
   ($99/yr) and an EV code-signing cert for Windows ($100–300/yr).
