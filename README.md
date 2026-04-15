@@ -143,18 +143,44 @@ Install locations:
 
 ## First run
 
-1. Launch After Effects.
-2. Create a comp with a green-screen layer.
-3. With the layer selected, apply **Effect → Keying → CorridorKey**.
-4. The effect panel shows a status line at the top. On first frame
-   it'll flip from **Starting up** → **Loading engine** → **Loading
-   model (...)** while the ~398 MB model weights download from the
-   upstream [corridorkey-mlx](https://github.com/nikopueringer/corridorkey-mlx)
-   GitHub release. First frame takes ~15–30 seconds over a fast
-   connection.
-5. Once the status reads **Ready | Xms | WxH**, keying is live. All
-   subsequent frames are fast (~165 ms at Fastest, ~600 ms at Full Res
-   on an RTX 4090).
+CorridorKey works by pairing your green-screen footage with a rough
+*alpha hint* matte. The hint doesn't need to be perfect — it just
+tells the model roughly where the foreground is — and Keylight is
+the quickest way to make one.
+
+1. **Open After Effects** and create a new composition.
+2. **Bring your green-screen clip into the comp.**
+3. **Duplicate the layer** so you have two copies stacked on top of
+   each other, perfectly aligned.
+4. **Rename the top layer to `hint`.** This one becomes the alpha
+   hint; the bottom one is what CorridorKey actually processes.
+5. **On the `hint` layer, apply Keylight** (*Effect → Keying →
+   Keylight (1.2)*) and pull a rough key on the green. Don't worry
+   about edges or spill — a fast, loose key is all you need.
+6. **Set Keylight's View to *Screen Matte*.** The layer should now
+   show a black-and-white silhouette of your subject. That's the
+   hint.
+7. **Hide the `hint` layer** (click the eyeball) so it doesn't
+   contribute to the comp visually — CorridorKey still reads its
+   pixels as input.
+8. **Select the bottom layer** and apply **Effect → Keying →
+   CorridorKey**.
+9. **In CorridorKey's Alpha Hint dropdown**, pick the `hint` layer.
+   Right next to the dropdown there's a source selector — **set it
+   to `Effects & Masks`** so CorridorKey reads the Keylight output,
+   not the raw source pixels.
+10. That's it. The status line in the effect panel flips through
+    **Starting up** → **Loading engine** → **Loading model (...)**
+    on first frame while the ~398 MB model weights download from
+    the upstream [corridorkey-mlx](https://github.com/nikopueringer/corridorkey-mlx)
+    GitHub release (~15–30 seconds over a fast connection). Once
+    the status reads **Ready | Xms | WxH**, keying is live and
+    subsequent frames are fast (~165 ms at Fastest, ~600 ms at Full
+    Res on an RTX 4090).
+
+> **Tip:** once you've got a result you like, switch **Output Mode**
+> through *Matte*, *Foreground*, and *Composite* to inspect each
+> stage. *Processed* (the default) is what you'll use in most comps.
 
 Model weights cache here and download exactly once per user account:
 
