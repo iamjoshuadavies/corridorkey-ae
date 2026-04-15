@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>CorridorKey AE</title>
+    <organization>com.corridorkey</organization>
+
+    <!-- System-wide install.
+         AE's /Applications/Adobe After Effects */Plug-Ins/Effects/ folder
+         is only writable by root, and AE doesn't scan a per-user plug-in
+         location on macOS (it scans five system paths — see the Plugin
+         Loading.log). So we can't do a friction-free per-user install the
+         way Windows can. The user sees one admin password prompt when
+         they open the .pkg; nothing else during install is interactive.
+         Install goes to /Library/Application Support/CorridorKey/ (shared
+         across all users on the machine, matching /Applications/AE). -->
+    <domains enable_currentUserHome="false" enable_localSystem="true"/>
+
+    <!-- Require macOS 11 (Big Sur). python-build-standalone 3.12 supports
+         10.15+, but we're Apple Silicon only, and the oldest Apple Silicon
+         Macs shipped with Big Sur. Not a real restriction for our audience. -->
+    <volume-check>
+        <allowed-os-versions>
+            <os-version min="11.0"/>
+        </allowed-os-versions>
+    </volume-check>
+
+    <options customize="never" require-scripts="true" allow-external-scripts="no"/>
+
+    <!-- Single component — we don't give users a choice of what to install. -->
+    <choices-outline>
+        <line choice="default">
+            <line choice="com.corridorkey.ae"/>
+        </line>
+    </choices-outline>
+    <choice id="default"/>
+    <choice id="com.corridorkey.ae" visible="false">
+        <pkg-ref id="com.corridorkey.ae"/>
+    </choice>
+
+    <!-- This filename is emitted by pkgbuild below and must match. -->
+    <pkg-ref id="com.corridorkey.ae" version="0.1.0" onConclusion="none">CorridorKey-component.pkg</pkg-ref>
+</installer-gui-script>

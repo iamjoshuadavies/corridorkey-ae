@@ -1,0 +1,137 @@
+#!/bin/bash
+#
+# CorridorKey AE — macOS postinstall script
+#
+# Runs after the .pkg payload has been installed at:
+#   /Library/Application Support/CorridorKey/python/     (python-build-standalone)
+#   /Library/Application Support/CorridorKey/runtime/    (server/, engines/, models/, pyproject.toml)
+#   /Library/Application Support/CorridorKey/installer/  (requirements.txt)
+#   /Library/Application Support/CorridorKey/plugin/CorridorKey.plugin
+#
+# Because the .pkg is a localSystem install, this script runs as root
+# and has free rein over /Applications/Adobe After Effects */Plug-ins/Effects/.
+# The user saw one admin password prompt when they opened the .pkg; nothing
+# else during the install is interactive.
+#
+# Our job here is:
+#   1. Create the venv in place, pointing at the bundled python
+#   2. Install the runtime dependencies into that venv (slow: ~200 MB of wheels)
+#   3. Copy the plugin bundle into the highest detected AE Plug-Ins/Effects folder
+#   4. Re-codesign the copy so Gatekeeper accepts it at the new location
+#   5. Write a VERSION file for upgrade detection
+#
+# If anything fails, `set -e` aborts and the .pkg surfaces the error to
+# the user via Installer.app. We ALSO write a dedicated log so there's a
+# breadcrumb trail for debugging.
+#
+
+set -e
+
+LOG="/Library/Logs/CorridorKey-install.log"
+mkdir -p "$(dirname "$LOG")"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"
+}
+
+log "=== CorridorKey AE postinstall starting ==="
+log "Running as: $(id -un)"
+
+INSTALL_ROOT="/Library/Application Support/CorridorKey"
+PYTHON="$INSTALL_ROOT/python/bin/python3"
+VENV="$INSTALL_ROOT/runtime/.venv"
+REQUIREMENTS="$INSTALL_ROOT/installer/requirements.txt"
+PLUGIN_SRC="$INSTALL_ROOT/plugin/CorridorKey.plugin"
+
+# --- Sanity check the payload ---
+for path in "$PYTHON" "$INSTALL_ROOT/runtime/server" "$INSTALL_ROOT/runtime/engines" "$REQUIREMENTS" "$PLUGIN_SRC"; do
+    if [ ! -e "$path" ]; then
+        log "ERROR: expected payload file/directory not found: $path"
+        log "The .pkg payload is broken — please reinstall or file a bug."
+        exit 1
+    fi
+done
+log "Payload sanity check passed"
+
+# --- Create the venv in place ---
+# Default symlink mode (NOT --copies) because python-build-standalone on macOS
+# relies on @rpath/libpython3.12.dylib and --copies breaks the dyld lookup.
+# The symlinks point at $INSTALL_ROOT/python/bin/python3 which is permanent
+# at this location for the life of the install.
+log "Creating venv at $VENV"
+rm -rf "$VENV"  # clean start on re-install
+"$PYTHON" -m venv "$VENV"
+log "Venv created"
+
+# --- Install runtime dependencies ---
+# Slow — pulls mlx (~40 MB), corridorkey-mlx, opencv, pillow, numpy. 30-60s on decent network.
+log "Installing Python dependencies (this takes a minute)..."
+"$VENV/bin/pip" install --quiet --no-cache-dir --disable-pip-version-check -r "$REQUIREMENTS" 2>&1 | tee -a "$LOG"
+log "Dependencies installed"
+
+# --- Sanity check the install ---
+if "$VENV/bin/python3" -c "import corridorkey_mlx, numpy, PIL, cv2, msgpack" 2>&1 | tee -a "$LOG"; then
+    log "Runtime import check passed"
+else
+    log "ERROR: one or more runtime imports failed after pip install"
+    exit 1
+fi
+
+# --- Find the highest AE version installed and drop the plugin there ---
+find_ae_plugins_dir() {
+    local latest=""
+    local latest_ver=0
+    for dir in "/Applications/Adobe After Effects "*; do
+        [ -d "$dir/Plug-ins/Effects" ] || continue
+        local name
+        name=$(basename "$dir")
+        # Extract the trailing integer (e.g. "Adobe After Effects 2026" -> 2026)
+        local ver
+        ver=$(echo "$name" | grep -oE '[0-9]+' | tail -1)
+        if [ -n "$ver" ] && [ "$ver" -gt "$latest_ver" ]; then
+            latest_ver=$ver
+            latest="$dir/Plug-ins/Effects"
+        fi
+    done
+    echo "$latest"
+}
+
+AE_PLUGINS_DIR=$(find_ae_plugins_dir)
+if [ -z "$AE_PLUGINS_DIR" ]; then
+    log "ERROR: no After Effects install found under /Applications/"
+    log "Install After Effects first, then re-run this installer."
+    # Don't hard-fail — the runtime side is still useful (dev can point at it).
+    # But warn the user loudly.
+    log "Plugin NOT installed into any AE Plug-Ins folder."
+    log "=== postinstall complete (WITH WARNING) ==="
+    exit 0
+fi
+
+log "Highest installed AE: $AE_PLUGINS_DIR"
+
+DEST="$AE_PLUGINS_DIR/CorridorKey.plugin"
+if [ -e "$DEST" ] || [ -L "$DEST" ]; then
+    log "Removing existing plugin at $DEST (upgrade or dev symlink)"
+    rm -rf "$DEST"
+fi
+
+log "Copying plugin to $DEST"
+cp -R "$PLUGIN_SRC" "$DEST"
+
+# Re-codesign after the copy so Gatekeeper accepts the new location.
+# Ad-hoc signing for now — a proper Developer ID cert is a future polish pass.
+log "Re-codesigning plugin"
+codesign --force --sign - --timestamp=none "$DEST" 2>&1 | tee -a "$LOG" || {
+    log "WARNING: codesign failed. AE may refuse to load the plugin until signed."
+}
+
+log "Plugin installed"
+
+# --- Write a VERSION file for upgrade detection ---
+echo "0.1.0" > "$INSTALL_ROOT/VERSION"
+
+log "=== CorridorKey AE postinstall complete ==="
+log "Launch After Effects and look for Effect > Keying > CorridorKey"
+log "Full install log: $LOG"
+
+exit 0

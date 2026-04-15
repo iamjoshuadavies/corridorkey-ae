@@ -70,6 +70,10 @@ ae_sdk/
 ae_sdk_win/
 Adobe_After_Effects_SDK/
 
+# --- Installer build cache ---
+# Downloaded python-build-standalone tarballs, cached across runs
+.build-cache/
+
 # --- Package / Release ---
 release/
 *.zip

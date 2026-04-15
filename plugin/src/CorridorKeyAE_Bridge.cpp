@@ -355,6 +355,15 @@ struct RuntimeBridge::Impl {
 #  endif
             }
         }
+#  ifdef __MACH__
+        //    System-wide install: /Library/Application Support/CorridorKey
+        //    This is where our macOS .pkg installer drops files — the .pkg
+        //    runs as a localSystem install because AE's Plug-Ins/Effects
+        //    folder under /Applications/... is only writable by root, so
+        //    per-user installs can't deliver the plugin. System install
+        //    handles both the runtime and the plugin copy in one go.
+        candidates.emplace_back("/Library/Application Support/CorridorKey");
+#  endif
 #endif
 
         // 3. Plugin-bundle-relative fallback. On macOS dev workflow this

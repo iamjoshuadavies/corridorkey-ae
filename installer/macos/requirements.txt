@@ -1,0 +1,14 @@
+# Runtime deps for the macOS installer.
+#
+# Installed into the bundled venv by the .pkg postinstall script, which
+# runs on the user's machine after files are laid down at their final
+# location (~/Library/Application Support/CorridorKey/). Keeping deps
+# version-agnostic here so pip resolves the latest compatible wheels
+# for the user's Python/arch at install time; pin here if we ever need
+# a reproducible install.
+
+corridorkey-mlx @ git+https://github.com/nikopueringer/corridorkey-mlx.git
+numpy
+Pillow
+opencv-python-headless
+msgpack
