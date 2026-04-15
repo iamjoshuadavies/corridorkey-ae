@@ -1,0 +1,14 @@
+# PyTorch CUDA wheels for the Windows installer.
+#
+# These aren't on PyPI proper — pip needs the download.pytorch.org index
+# to find the +cu121 tagged wheels. The `--index-url` directive below
+# makes pip use ONLY that index for this file, which is fine because we
+# install base deps (numpy, Pillow, etc.) separately from the main PyPI.
+#
+# Pin these because the CUDA wheel tags are release-gated and sliding
+# them forward is a deliberate compatibility decision, not an "always
+# latest" thing.
+
+--index-url https://download.pytorch.org/whl/cu121
+torch==2.5.1+cu121
+torchvision==0.20.1+cu121

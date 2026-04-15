@@ -239,3 +239,87 @@ jobs:
           name: CorridorKey-Installer-macOS
           path: dist/CorridorKey-*.pkg
           retention-days: 30
+
+  # =============================================================================
+  # Windows installer — produces a shippable .exe from the plugin artifact.
+  # =============================================================================
+  installer-windows:
+    name: Installer (Windows .exe)
+    runs-on: windows-latest
+    needs: plugin-build
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Download the plugin artifact built by plugin-build -----------------
+      # The Windows plugin-build uploads the raw CorridorKey.aex (single file,
+      # no bundle wrapper on Windows, so no zip round-trip needed the way
+      # macOS needs one). Drop it where build_windows.ps1 expects it by
+      # default: build_win\plugin\Release\CorridorKey.aex
+      - name: Download plugin artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: CorridorKey-Windows
+          path: build_win/plugin/Release
+
+      - name: Verify downloaded .aex
+        shell: pwsh
+        run: |
+          $aex = "build_win/plugin/Release/CorridorKey.aex"
+          if (-not (Test-Path $aex)) {
+              throw "Plugin .aex not found at $aex after artifact download"
+          }
+          $size = (Get-Item $aex).Length
+          Write-Host "Downloaded .aex: $aex ($size bytes)"
+
+      # --- Install InnoSetup 6 -----------------------------------------------
+      # windows-latest GitHub runners ship Chocolatey pre-installed, so this
+      # is the fastest route to ISCC.exe. choco places it at
+      #   C:\Program Files (x86)\Inno Setup 6\ISCC.exe
+      # which is one of the candidates build_windows.ps1 already auto-probes.
+      - name: Install InnoSetup 6
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress --limit-output
+          # Verify ISCC is on PATH after the install (choco refreshenv quirk)
+          $iscc = Get-ChildItem 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe','C:\Program Files\Inno Setup 6\ISCC.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $iscc) { throw "ISCC.exe not found after choco install" }
+          Write-Host "ISCC: $($iscc.FullName)"
+
+      # --- Build the .exe via our local script --------------------------------
+      # scripts/installer/build_windows.ps1 is designed to work identically on
+      # the CI runner and locally — downloads python-build-standalone, stages
+      # the payload, runs ISCC, and drops the result in dist/. No CI-specific
+      # logic inside the script itself.
+      - name: Build .exe installer
+        shell: pwsh
+        run: |
+          $sha = "${{ github.sha }}".Substring(0,7)
+          ./scripts/installer/build_windows.ps1 -Version "0.1.0-$sha"
+
+      - name: Verify .exe
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist/CorridorKey-*-windows-x64.exe | Select-Object -First 1
+          if (-not $exe) { throw "Installer .exe not found in dist/" }
+          Write-Host "Built: $($exe.FullName)"
+          $sizeMb = [int]($exe.Length / 1MB)
+          Write-Host "Size: ${sizeMb} MB"
+
+          # Cheap structural sanity check: an InnoSetup-built .exe always
+          # starts with "MZ" (PE magic) and contains the magic marker
+          # "Inno Setup" somewhere in its resources. Full extraction would
+          # need innounp + 40 MB of dependencies; this is enough to catch
+          # a build that silently produced a zero-byte or corrupted file.
+          if ($exe.Length -lt 1MB) { throw "Installer is suspiciously small: $($exe.Length) bytes" }
+          $bytes = [System.IO.File]::ReadAllBytes($exe.FullName)[0..1]
+          if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
+              throw "Installer does not start with MZ — not a valid PE"
+          }
+          Write-Host "PE header OK"
+
+      - name: Upload .exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CorridorKey-Installer-Windows
+          path: dist/CorridorKey-*-windows-x64.exe
+          retention-days: 30

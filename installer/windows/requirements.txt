@@ -1,0 +1,17 @@
+# Base runtime deps for the Windows installer.
+#
+# Installed into the bundled venv by CorridorKey.iss's [Run] step, which
+# runs at the tail end of the installer after files are laid down under
+# C:\Program Files\CorridorKey\. Keeping deps version-agnostic here so
+# pip resolves the latest compatible wheels at install time. Pin here
+# if we ever need reproducible installs across machines.
+#
+# torch + torchvision are in requirements-torch.txt because they need
+# a separate index (the +cu121 CUDA wheels are not on PyPI proper).
+
+msgpack
+numpy
+Pillow
+opencv-python-headless
+timm
+safetensors
