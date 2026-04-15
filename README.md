@@ -232,10 +232,44 @@ pointing at it. See [Building](#building) below.
 
 Full double-click installers that bundle everything needed (Python
 interpreter, all dependencies, the plugin itself — model weights
-still auto-download on first run) are planned for the first tagged
-release. Track progress in [#28](https://github.com/iamjoshuadavies/corridorkey-ae/issues/28).
+still auto-download on first run) are in progress. The macOS `.pkg`
+is already building in CI on every push; the Windows `.exe` is next.
+Track progress in [#28](https://github.com/iamjoshuadavies/corridorkey-ae/issues/28).
 
-Until then, you need to build from source.
+#### macOS: unblocking the unsigned `.pkg`
+
+The installer is **not yet signed or notarized**, so macOS Gatekeeper
+will refuse to open it on a double-click with a message like *"Apple
+could not verify CorridorKey is free of malware"*. This is expected.
+Two ways around it:
+
+**Option A — one-off, via System Settings (recommended for most users):**
+
+1. Double-click the `.pkg`. Gatekeeper blocks it, click **Done**.
+2. Open **System Settings → Privacy & Security**.
+3. Scroll to the **Security** section. You'll see a message like
+   *"CorridorKey-0.1.0-macOS-arm64.pkg was blocked to protect your Mac."*
+4. Click **Open Anyway**, then authenticate with your password or Touch ID.
+5. The installer will re-open; click **Open** on the second Gatekeeper prompt.
+6. Enter your admin password once when the installer asks — the payload
+   writes to `/Library/Application Support/` which is root-owned.
+
+**Option B — one command, via Terminal (faster if you're comfortable):**
+
+```bash
+# Strip the quarantine xattr that Gatekeeper checks for
+xattr -d com.apple.quarantine ~/Downloads/CorridorKey-*.pkg
+
+# Then double-click as normal, or install from the terminal:
+sudo installer -pkg ~/Downloads/CorridorKey-*.pkg -target /
+```
+
+Either way, once installed the plugin runs with no further prompts —
+Gatekeeper only gates the `.pkg` itself, not the postinstall steps or
+the plugin at runtime. Signed + notarized installers are a future
+polish pass (needs an Apple Developer ID, $99/yr).
+
+Until the Windows installer lands, you need to build from source.
 
 ## Remaining Work
 
