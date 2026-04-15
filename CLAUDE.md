@@ -63,6 +63,129 @@ Claude's bash session is not elevated even when Claude Desktop is launched
 as admin (sandbox runs at medium integrity). The `Copy-Item` step into
 Program Files must be run by the user from an admin shell.
 
+## Installers (feature/installers branch — WIP, issue #28)
+
+**Status:** macOS `.pkg` is done end-to-end (Phases 1–3 of #28). Windows
+`.exe` is next (Phases 4–5). Work lives on the `feature/installers`
+branch, not yet merged to main.
+
+### Done (macOS)
+- `scripts/installer/build_macos.sh` — stages `python-build-standalone`
+  3.12.13 aarch64 + runtime source + plugin bundle + `requirements.txt`
+  into a temp tree, runs `pkgbuild` + `productbuild`, drops a
+  ~17 MB `CorridorKey-<ver>-macOS-arm64.pkg` in `dist/`.
+- `installer/macos/Distribution.xml` — productbuild wrapper.
+  `localSystem` domain (NOT per-user) because AE on macOS only scans
+  5 system paths under `/Applications/Adobe After Effects */Plug-Ins/`,
+  so there's no friction-free user install. One admin prompt at
+  install time is unavoidable.
+- `installer/macos/scripts/postinstall` — runs as root after payload
+  is laid down at `/Library/Application Support/CorridorKey/`. Creates
+  venv (default symlink mode — NOT `--copies`, that breaks
+  `@rpath/libpython3.12.dylib` lookup), pip-installs runtime deps,
+  finds the highest AE version via `/Applications/Adobe After Effects *`
+  glob + trailing-integer extraction, copies plugin bundle into the
+  detected `Plug-Ins/Effects/`, re-codesigns ad-hoc with
+  `codesign --force --sign - --timestamp=none`, writes `VERSION` file.
+  Logs to `/Library/Logs/CorridorKey-install.log`.
+- `installer/macos/requirements.txt` — deps the postinstall pip-installs:
+  corridorkey-mlx (git), numpy, Pillow, opencv-python-headless, msgpack.
+- `plugin/src/CorridorKeyAE_Bridge.cpp` — `FindRepoRoot()` now includes
+  `/Library/Application Support/CorridorKey` as a macOS candidate so
+  the bridge finds the runtime delivered by the `.pkg`.
+- CI: `installer-macos` job in `.github/workflows/ci.yml` runs on
+  `macos-latest`, depends on `plugin-build`, downloads the
+  `CorridorKey-macOS` artifact (which is a zip of the `.plugin` bundle —
+  `actions/upload-artifact@v4` flattens single-dir parents, so we
+  zip-wrap before upload), unpacks into `build/plugin/`, runs
+  `build_macos.sh`, verifies via `pkgutil --expand`, uploads
+  `CorridorKey-Installer-macOS` artifact.
+- `scripts/installer/clean_and_test_macos.sh` — one-shot clean-slate
+  harness. Wipes plugin copies from every AE install, nukes
+  `/Library/Application Support/CorridorKey`, user-level caches,
+  `pkgutil --forget com.corridorkey.ae`, stray runtime processes,
+  port handoff file. Then optionally installs a `.pkg` and verifies
+  (install tree layout + AE plugin drop + venv import check). Usage:
+  `./scripts/installer/clean_and_test_macos.sh --from-ci` to test the
+  latest CI-built installer.
+- README: Gatekeeper unblock documented (System Settings → Privacy &
+  Security → Open Anyway, or `xattr -d com.apple.quarantine`).
+- **Verified:** user ran clean-slate cleanup, double-clicked CI-built
+  `.pkg`, installed successfully, launched AE, CorridorKey appeared in
+  Effect ▸ Keying ▸ CorridorKey, keying worked end-to-end.
+
+### Key macOS learnings that transfer to Windows
+1. **Don't pre-build the venv on the CI runner.** Venvs bake absolute
+   paths into `pyvenv.cfg` and shebangs. Create the venv at install
+   time on the user's machine instead. The installer payload ships
+   Python + requirements.txt; postinstall runs `python -m venv` + pip.
+   Install is slower (~1 minute) but bulletproof across machines.
+2. **Ship runtime source + requirements.txt, not a prebuilt venv.**
+   This keeps the installer small and avoids the abspath bake-in.
+3. **The `CorridorKey-macOS` artifact from the plugin-build job is
+   required input for the installer-macos job.** Same pattern should
+   work for Windows: `installer-windows` needs `needs: plugin-build`
+   and downloads `CorridorKey-Windows` (which is the raw `.aex`
+   already — no bundle wrapper to preserve on Windows).
+4. **AE version detection: glob for `Adobe After Effects *`, extract
+   trailing integer, pick highest.** The same bash logic translates
+   directly to Pascal in InnoSetup's `[Code]` section.
+
+### Windows (next — Phases 4+5 of #28)
+**Phase 4 — local PoC (do this first on the Windows machine).**
+Hand-craft an install tree at `%LOCALAPPDATA%\CorridorKey\`:
+```
+%LOCALAPPDATA%\CorridorKey\
+├── python\                 <- python-build-standalone 3.12 x86_64-pc-windows-msvc
+│   └── python.exe
+├── runtime\
+│   ├── .venv\              <- created at install time from the embedded python
+│   │   └── Scripts\python.exe
+│   ├── server\
+│   ├── engines\
+│   └── models\
+├── plugin\
+│   └── CorridorKey.aex
+├── installer\
+│   └── requirements.txt
+└── VERSION
+```
+The bridge already checks `%LOCALAPPDATA%\CorridorKey` before
+`%ProgramFiles%\CorridorKey` — see `FindRepoRoot()`. Verify:
+1. Delete `CORRIDORKEY_REPO_ROOT` env var (or unset for the test shell).
+2. Extract `python-build-standalone` 3.12 windows x64 `install_only` tarball into `%LOCALAPPDATA%\CorridorKey\python\`.
+3. Copy `runtime\{server,engines,models}` + `pyproject.toml` to `%LOCALAPPDATA%\CorridorKey\runtime\`.
+4. Run `%LOCALAPPDATA%\CorridorKey\python\python.exe -m venv %LOCALAPPDATA%\CorridorKey\runtime\.venv`.
+5. `pip install` the Windows requirements (msgpack numpy Pillow opencv-python-headless timm safetensors + torch CUDA).
+6. Copy the built `CorridorKey.aex` to `C:\Users\<user>\AppData\Roaming\Adobe\After Effects\26.0\Plug-ins\` (per-user AE plug-ins folder — no admin needed) or to `Program Files` if you're testing admin flow.
+7. Launch AE, apply CorridorKey, confirm the runtime launches from
+   the per-user install (not from `CORRIDORKEY_REPO_ROOT`).
+
+Once Phase 4 proves the layout works, Phase 5 is writing the
+InnoSetup `.iss` script that does the same thing under the hood and
+wiring it into CI.
+
+**Open question on Windows plugin drop location:** per-user install is
+the plan, but `%APPDATA%\Adobe\After Effects\<version>\Plug-ins\` is
+per-user and `%ProgramFiles%\Adobe\Adobe After Effects <ver>\Support Files\Plug-ins\Effects\` is machine-wide-needs-admin. Check AE's
+Plugin Loading.log on Windows to see which paths it actually scans
+before committing — it may only scan `Program Files` by default and
+not touch the `%APPDATA%` per-user folder, in which case we need
+`PrivilegesRequired=admin` after all and the per-user-ness of the
+install only applies to the `%LOCALAPPDATA%\CorridorKey` runtime tree.
+
+### Architectural non-goals for installers (don't re-litigate)
+- **Signing / notarization** — deferred. Needs an Apple Developer ID
+  ($99/yr) and an EV code-signing cert for Windows ($100–300/yr).
+  Documented Gatekeeper/SmartScreen workarounds in README.
+- **Bundled model weights** — deferred. They auto-download on first
+  frame from the upstream GitHub release (~398 MB one-time) and the
+  UI already shows "Loading model..." status. Bundling would 10x
+  the installer size.
+- **Upgrade migrations** — for now, the clean path is uninstall old
+  then install new. Revisit if upgrade-in-place becomes a real
+  complaint.
+
 ## Architecture
 - `plugin/` — C++ AE effect plugin (CMake build, Drawbot UI, Smart Render)
 - `runtime/` — Python inference service (corridorkey_mlx, tiled inference)
