@@ -212,49 +212,67 @@ corridorkey-ae/
 | **Refiner** | Edge refinement strength (0-1) |
 | **Matte Cleanup** | Tighten and smooth matte edges (0-1) |
 
-## Downloads
+## Installation
 
-### For developers — CI build artifacts
+One double-click installer per platform — both bundle the Python
+runtime, create a dedicated venv, pip-install all dependencies, and
+drop the plugin into After Effects automatically. The only thing that
+isn't bundled is the model weights: they download on first frame
+(~398 MB, one-time, cached locally), with a **Loading model (...)**
+status visible in the effect panel while it runs.
 
-Every push to `main` produces raw plugin binaries (`.plugin` for
-macOS, `.aex` for Windows) as downloadable artifacts from the
-[Actions tab](https://github.com/iamjoshuadavies/corridorkey-ae/actions).
-Open the latest successful CI run and grab `CorridorKey-macOS` or
-`CorridorKey-Windows` from the Artifacts section.
+### System requirements
 
-**These are developer-only builds.** They contain just the plugin
-binary — no Python runtime, no dependencies, no model weights. To
-actually use them you need a source checkout of this repo with
-`runtime/.venv/` set up, and the `CORRIDORKEY_REPO_ROOT` env var
-pointing at it. See [Building](#building) below.
+| Platform | Minimum | Verified on |
+|---|---|---|
+| **macOS** | Apple Silicon (M1/M2/M3/M4/M5), macOS 11 (Big Sur) or later, After Effects 2024+ | MacBook Pro M5, AE 2026 |
+| **Windows** | x64 with NVIDIA GPU (CUDA 12.1 compatible), Windows 10 1803+ or Windows 11, After Effects 2024+ | RTX 4090, Windows 11, AE 2026 |
 
-### For end users — full installers
+No Python install needed, no command line, no env vars. The installer
+takes care of everything.
 
-Full double-click installers that bundle everything needed (Python
-interpreter, all dependencies, the plugin itself — model weights
-still auto-download on first run) are in progress. The macOS `.pkg`
-is already building in CI on every push; the Windows `.exe` is next.
-Track progress in [#28](https://github.com/iamjoshuadavies/corridorkey-ae/issues/28).
+### Downloading the installer
 
-#### macOS: unblocking the unsigned `.pkg`
+There are no proper GitHub Releases yet — builds come from CI. Grab the
+latest green run from the [**Actions tab**](https://github.com/iamjoshuadavies/corridorkey-ae/actions/workflows/ci.yml)
+and download whichever artifact matches your platform:
+
+| Platform | Artifact | File |
+|---|---|---|
+| macOS  | `CorridorKey-Installer-macOS`    | `CorridorKey-<ver>-macOS-arm64.pkg` |
+| Windows | `CorridorKey-Installer-Windows` | `CorridorKey-<ver>-windows-x64.exe` |
+
+1. Open the linked workflow page.
+2. Click the most recent run with a green checkmark next to **CI**.
+3. Scroll to the **Artifacts** section at the bottom.
+4. Click the platform artifact — GitHub downloads it as a `.zip`.
+5. Unzip it. Inside is the actual `.pkg` / `.exe`.
+
+(If you're not signed in to GitHub, the Artifacts section won't show —
+sign in and refresh.)
+
+Proper GitHub Releases with checksums will land when the installers
+get signed + notarized.
+
+### macOS install
 
 The installer is **not yet signed or notarized**, so macOS Gatekeeper
-will refuse to open it on a double-click with a message like *"Apple
-could not verify CorridorKey is free of malware"*. This is expected.
-Two ways around it:
+refuses to open it on a plain double-click with something like *"Apple
+could not verify CorridorKey is free of malware"*. Expected. Unblock
+it one of two ways:
 
-**Option A — one-off, via System Settings (recommended for most users):**
+**Option A — one-off, via System Settings (recommended):**
 
-1. Double-click the `.pkg`. Gatekeeper blocks it, click **Done**.
+1. Double-click the `.pkg`. Gatekeeper blocks it; click **Done**.
 2. Open **System Settings → Privacy & Security**.
 3. Scroll to the **Security** section. You'll see a message like
    *"CorridorKey-0.1.0-macOS-arm64.pkg was blocked to protect your Mac."*
 4. Click **Open Anyway**, then authenticate with your password or Touch ID.
-5. The installer will re-open; click **Open** on the second Gatekeeper prompt.
-6. Enter your admin password once when the installer asks — the payload
+5. The installer reopens; click **Open** on the second Gatekeeper prompt.
+6. Enter your admin password when the installer asks — the payload
    writes to `/Library/Application Support/` which is root-owned.
 
-**Option B — one command, via Terminal (faster if you're comfortable):**
+**Option B — one command, via Terminal:**
 
 ```bash
 # Strip the quarantine xattr that Gatekeeper checks for
@@ -264,22 +282,99 @@ xattr -d com.apple.quarantine ~/Downloads/CorridorKey-*.pkg
 sudo installer -pkg ~/Downloads/CorridorKey-*.pkg -target /
 ```
 
-Either way, once installed the plugin runs with no further prompts —
+Either route: once installed, the plugin runs with no further prompts.
 Gatekeeper only gates the `.pkg` itself, not the postinstall steps or
-the plugin at runtime. Signed + notarized installers are a future
-polish pass (needs an Apple Developer ID, $99/yr).
+the plugin at runtime.
 
-Until the Windows installer lands, you need to build from source.
+Installs land at:
+- `/Library/Application Support/CorridorKey/` — bundled Python, venv, runtime source
+- `/Applications/Adobe After Effects <version>/Plug-Ins/Effects/CorridorKey.plugin` — the effect
+- `/Library/Logs/CorridorKey-install.log` — installer's own log (useful if something breaks)
+
+### Windows install
+
+The installer is **not yet signed with an EV code-signing certificate**,
+so Windows SmartScreen shows a blue *"Windows protected your PC"* dialog
+on first launch. Expected. To proceed:
+
+1. Double-click the `.exe`.
+2. SmartScreen dialog appears. Click **More info**.
+3. A **Run anyway** button appears below the details. Click it.
+4. UAC prompt appears asking to allow the installer to make changes to
+   your device. Click **Yes** (the installer needs to write to
+   `Program Files\Adobe\...\Plug-ins\Effects\`).
+5. Installer runs silently. **Wait ~5 minutes.** The bulk of the time
+   is the PyTorch CUDA wheel download (~2 GB over the pip index); the
+   installer window doesn't show progress for this, which is normal.
+   Task Manager will show a `pip` process doing real work.
+6. Installer exits. No further prompts.
+
+Installs land at:
+- `C:\Program Files\CorridorKey\` — bundled Python, venv, runtime source, plugin staging copy
+- `C:\Program Files\Adobe\Adobe After Effects <version>\Support Files\Plug-ins\Effects\CorridorKey.aex` — the effect
+- Add/Remove Programs: **CorridorKey** — use this for a clean uninstall
+
+### First run
+
+1. Launch After Effects.
+2. Create a comp with a green-screen layer.
+3. With the layer selected, **Effect → Keying → CorridorKey**.
+4. The effect panel shows a status line at the top. On first frame
+   it'll flip from **Starting up** → **Loading engine** → **Loading
+   model (...)** while the ~398 MB model weights download in the
+   background. First frame takes ~15–30 seconds over a fast connection.
+5. Once the status reads **Ready | Xms | WxH**, keying is live. All
+   subsequent frames are fast (~165 ms at Fastest, ~558 ms at Full Res
+   on an RTX 4090).
+
+Model weights cache at:
+- macOS: `~/Library/Application Support/CorridorKey/models/`
+- Windows: `%LOCALAPPDATA%\CorridorKey\models\`
+
+So the slow first-run download happens exactly once per user account.
+
+### Uninstalling and starting fresh
+
+Both platforms have a clean-slate script that wipes every artifact the
+installer or a dev session could have left behind — install tree,
+plugin copies from every AE install, registry receipts, stray runtime
+processes, temp files. Useful when you want to re-test an installer
+from a known-empty state, or when you just want CorridorKey completely
+gone.
+
+**macOS:**
+```bash
+./scripts/installer/clean_macos.sh
+```
+
+**Windows (from an _elevated_ PowerShell — right-click → Run as
+administrator):**
+```powershell
+.\scripts\installer\clean_windows.ps1
+```
+
+Neither script installs anything — they just clean. Pair them with a
+fresh installer download to test end-to-end. By default the Windows
+script preserves `%LOCALAPPDATA%\CorridorKey\models\` (the ~400 MB
+cached weights) so you don't have to re-download on the next install;
+pass `-KeepModelCache:$false` to wipe those too.
+
+Windows also has a normal **Add/Remove Programs** entry if you just
+want to uninstall through Settings. macOS has no equivalent — Apple's
+Installer.app doesn't track pkgbuild payloads for removal — so the
+clean script is the intended uninstall path there too.
 
 ## Remaining Work
 
-See [open issues](https://github.com/iamjoshuadavies/corridorkey-ae/issues) for the full backlog. Key items:
+See [open issues](https://github.com/iamjoshuadavies/corridorkey-ae/issues) for the full backlog. Key items still open:
 
-- [ ] **Full installers for macOS + Windows** (#28) — bundled Python
-      interpreter via [python-build-standalone](https://github.com/astral-sh/python-build-standalone),
-      `.pkg` on macOS via `pkgbuild`/`productbuild`, `.exe` on Windows
-      via InnoSetup. One-click install, no terminal, no env vars.
-- [ ] **Float32 pipeline** (#10) — skip uint8 quantization for 32bpc projects
+- [ ] **Signed + notarized installers** — drops the Gatekeeper
+      workaround on macOS and the SmartScreen warning on Windows.
+      Needs an Apple Developer ID ($99/yr) and a Windows EV code
+      signing cert ($100–300/yr).
+- [ ] **Proper GitHub Releases** with checksums and a versioned
+      changelog, so users don't have to dig through CI artifacts.
+- [ ] **Float32 pipeline** (#10) — skip uint8 quantization for 32bpc projects.
 
 ## Credits
 
