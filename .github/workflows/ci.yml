@@ -28,7 +28,7 @@ jobs:
   # the GitHub Release (when cut via a v* tag) all agree.
   #
   #   Tag push   (refs/tags/vX.Y.Z)  ->  X.Y.Z       (for cutting releases)
-  #   Anything else                  ->  0.1.0-<sha7>  (daily CI)
+  #   Anything else                  ->  0.2.0-<sha7>  (daily CI)
   #
   # Also exposes `is_release` so the release job can gate on it.
   # =============================================================================
@@ -48,7 +48,7 @@ jobs:
             echo "version=$VERSION" >> "$GITHUB_OUTPUT"
             echo "is_release=true" >> "$GITHUB_OUTPUT"
           else
-            echo "version=0.1.0-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "version=0.2.0-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
             echo "is_release=false" >> "$GITHUB_OUTPUT"
           fi
           echo "Version: $(grep '^version=' "$GITHUB_OUTPUT" | cut -d= -f2)"
