@@ -35,6 +35,10 @@
 
 ---
 
+<p align="center">
+  <img src="docs/images/example.gif" alt="CorridorKey AE demo" width="720">
+</p>
+
 CorridorKey AE brings physically accurate green-screen separation directly
 into After Effects. Apply the effect to a green-screen layer and you get
 production-quality keying with foreground extraction, despill, and matte
