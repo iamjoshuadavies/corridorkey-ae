@@ -36,10 +36,11 @@
 ---
 
 CorridorKey AE brings physically accurate green-screen separation directly
-into After Effects. Apply the effect, optionally point it at an alpha hint
-layer, and get production-quality keying with foreground extraction,
-despill, and matte cleanup — all powered by ML inference running locally
-on your machine. No cloud, no account, no subscription.
+into After Effects. Apply the effect to a green-screen layer and you get
+production-quality keying with foreground extraction, despill, and matte
+cleanup — no manual setup needed, no cloud, no account, no subscription.
+The built-in chroma keyer auto-detects the green screen and generates the
+alpha hint that drives the ML model, all running locally on your machine.
 
 > **Status:** v0.1.0 shipped. Keying pipeline working end-to-end on both
 > platforms. Installers ship unsigned — expect one Gatekeeper /
@@ -143,44 +144,34 @@ Install locations:
 
 ## First run
 
-CorridorKey works by pairing your green-screen footage with a rough
-*alpha hint* matte. The hint doesn't need to be perfect — it just
-tells the model roughly where the foreground is — and Keylight is
-the quickest way to make one.
-
 1. **Open After Effects** and create a new composition.
 2. **Bring your green-screen clip into the comp.**
-3. **Duplicate the layer** so you have two copies stacked on top of
-   each other, perfectly aligned.
-4. **Rename the top layer to `hint`.** This one becomes the alpha
-   hint; the bottom one is what CorridorKey actually processes.
-5. **On the `hint` layer, apply Keylight** (*Effect → Keying →
-   Keylight (1.2)*) and pull a rough key on the green. Don't worry
-   about edges or spill — a fast, loose key is all you need.
-6. **Set Keylight's View to *Screen Matte*.** The layer should now
-   show a black-and-white silhouette of your subject. That's the
-   hint.
-7. **Hide the `hint` layer** (click the eyeball) so it doesn't
-   contribute to the comp visually — CorridorKey still reads its
-   pixels as input.
-8. **Select the bottom layer** and apply **Effect → Keying →
-   CorridorKey**.
-9. **In CorridorKey's Alpha Hint dropdown**, pick the `hint` layer.
-   Right next to the dropdown there's a source selector — **set it
-   to `Effects & Masks`** so CorridorKey reads the Keylight output,
-   not the raw source pixels.
-10. That's it. The status line in the effect panel flips through
-    **Starting up** → **Loading engine** → **Loading model (...)**
-    on first frame while the ~398 MB model weights download from
-    the upstream [corridorkey-mlx](https://github.com/nikopueringer/corridorkey-mlx)
-    GitHub release (~15–30 seconds over a fast connection). Once
-    the status reads **Ready | Xms | WxH**, keying is live and
-    subsequent frames are fast (~165 ms at Fastest, ~600 ms at Full
-    Res on an RTX 4090).
+3. **Select the layer** and apply **Effect → Keying → CorridorKey**.
+4. That's it. The built-in chroma keyer auto-detects the green screen
+   and generates the alpha hint for you. The status line in the effect
+   panel flips through **Starting up** → **Loading engine** →
+   **Loading model (...)** on first frame while the ~398 MB model
+   weights download from the upstream
+   [corridorkey-mlx](https://github.com/nikopueringer/corridorkey-mlx)
+   GitHub release (~15–30 seconds over a fast connection). Once the
+   status reads **Ready | Xms | WxH**, keying is live and subsequent
+   frames are fast (~165 ms at Fastest, ~600 ms at Full Res on an
+   RTX 4090).
+
+If the auto-generated key isn't clean enough, adjust the **Screen Clip**
+slider — it controls the threshold between foreground and background.
+Higher values produce a tighter key. You can preview exactly what the
+model receives by switching **Output Mode** to *Alpha Hint*.
+
+> **Tip:** for difficult footage or when you want full control, switch
+> **Hint Mode** to *Layer* and supply your own alpha hint — for example,
+> duplicate the layer, apply Keylight with Screen Matte view, hide it,
+> then select it as the Alpha Hint layer with the source set to
+> *Effects & Masks*. This is the manual workflow from earlier versions.
 
 > **Tip:** once you've got a result you like, switch **Output Mode**
-> through *Matte*, *Foreground*, and *Composite* to inspect each
-> stage. *Processed* (the default) is what you'll use in most comps.
+> through *Alpha Hint*, *Matte*, *Foreground*, *Composite*, and
+> *Processed* to inspect each stage of the pipeline.
 
 Model weights cache here and download exactly once per user account:
 
@@ -189,12 +180,13 @@ Model weights cache here and download exactly once per user account:
 
 ## Features
 
+- **Drag-and-drop keying** — apply the effect and go. The built-in chroma keyer auto-detects the green screen and generates the alpha hint. No manual setup needed.
 - **Cross-platform** — macOS (Apple Silicon) and Windows (x64/NVIDIA)
 - **Local inference** — MLX on Apple Silicon, PyTorch/CUDA on Windows. Nothing leaves your machine.
 - **Native AE effect** — Smart Render, Multi-Frame Rendering, 8/16/32bpc float support
 - **Tiled full-resolution output** — works at 1080p, 4K, and beyond
 - **Quality presets** — Fastest (256) → Fast (512) → High (1024) → Full Res (Tiled)
-- **Alpha hint input** — precomp a rough key with any other tool and feed it in
+- **Auto or manual hint** — auto-generate mode for quick work, or supply your own alpha hint layer for full control
 - **Post-processing** — Despill, Despeckle, Refiner, Matte Cleanup (all re-applied without re-running the model)
 - **Two-tier frame caching** — raw model output and post-processed response cached independently
 - **Auto-launch runtime** — no manual server start, no console windows
@@ -204,13 +196,15 @@ Model weights cache here and download exactly once per user account:
 
 | Control | Description |
 |---------|-------------|
-| **Output Mode** | Processed / Matte / Foreground / Composite |
-| **Alpha Hint** | Layer input for an external alpha matte |
+| **Hint Mode** | Auto Generate (default) — built-in keyer. Layer — supply your own hint. |
+| **Alpha Hint** | Layer input for an external alpha matte (only when Hint Mode = Layer) |
+| **Screen Clip** | Threshold for the auto-generated key (only when Hint Mode = Auto Generate). Higher = tighter key. |
 | **Quality** | Fastest (256) → Full Res (Tiled) |
 | **Despill** | Remove green spill from edges (0–1) |
 | **Despeckle** | Remove small matte noise (0–1) |
 | **Refiner** | Edge refinement strength (0–1) |
 | **Matte Cleanup** | Tighten and smooth matte edges (0–1) |
+| **Output Mode** | Alpha Hint / Matte / Foreground / Composite / Processed (default) |
 
 ## Performance
 

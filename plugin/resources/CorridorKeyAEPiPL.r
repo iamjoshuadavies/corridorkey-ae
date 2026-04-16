@@ -41,7 +41,7 @@ resource 'PiPL' (16000) {
 			0
 		},
 		AE_Effect_Global_OutFlags {
-			0x02008400	/* PF_OutFlag_PIX_INDEPENDENT (1<<10) | PF_OutFlag_CUSTOM_UI (1<<15) | PF_OutFlag_DEEP_COLOR_AWARE (1<<25) */
+			0x06008400	/* PF_OutFlag_PIX_INDEPENDENT (1<<10) | PF_OutFlag_CUSTOM_UI (1<<15) | PF_OutFlag_DEEP_COLOR_AWARE (1<<25) | PF_OutFlag_SEND_UPDATE_PARAMS_UI (1<<26) */
 		},
 		AE_Effect_Global_OutFlags_2 {
 			0x08001400	/* SUPPORTS_SMART_RENDER (1<<10) | FLOAT_COLOR_AWARE (1<<12) | SUPPORTS_THREADED_RENDERING (1<<27) */

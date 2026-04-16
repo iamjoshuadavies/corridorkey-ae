@@ -12,6 +12,10 @@
 #include "CorridorKeyAE_UI.h"
 
 #if AE_SDK_AVAILABLE
+#include "AE_EffectSuites.h"
+#endif
+
+#if AE_SDK_AVAILABLE
 
 // =============================================================================
 // Registration Entry Point — tells AE about this effect
@@ -89,6 +93,10 @@ EffectMain(
                     reinterpret_cast<PF_EventExtra*>(extra));
                 break;
 
+            case PF_Cmd_UPDATE_PARAMS_UI:
+                err = corridorkey::HandleUpdateParamsUI(in_data, out_data, params);
+                break;
+
             case PF_Cmd_USER_CHANGED_PARAM:
                 err = corridorkey::HandleUserChangedParam(in_data, out_data, params,
                     reinterpret_cast<PF_UserChangedParamExtra*>(extra));
@@ -153,7 +161,8 @@ A_Err HandleGlobalSetup(PF_InData* in_data, PF_OutData* out_data)
     out_data->out_flags =
         PF_OutFlag_PIX_INDEPENDENT |
         PF_OutFlag_DEEP_COLOR_AWARE |
-        PF_OutFlag_CUSTOM_UI;
+        PF_OutFlag_CUSTOM_UI |
+        PF_OutFlag_SEND_UPDATE_PARAMS_UI;
 
     out_data->out_flags2 =
         PF_OutFlag2_SUPPORTS_SMART_RENDER |
@@ -191,6 +200,65 @@ A_Err HandleRender(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params
     return RenderEffect(in_data, out_data, params, output);
 }
 
+// Helper: show/hide Alpha Hint and Screen Clip rows based on Hint Mode.
+// Auto Generate -> disable Alpha Hint layer, enable Screen Clip
+// Layer         -> enable Alpha Hint layer, disable Screen Clip
+//
+// Must copy params before modifying — they're read-only in UPDATE_PARAMS_UI.
+// Uses PF_ParamUtilsSuite3::PF_UpdateParamUI (pattern from SDK Supervisor sample).
+static void UpdateHintModeVisibility(PF_InData* in_data, PF_ParamDef* params[])
+{
+#if AE_SDK_AVAILABLE
+    auto hint_mode = static_cast<HintMode>(params[PARAM_HINT_MODE]->u.pd.value - 1);
+
+    // Acquire PF_ParamUtilsSuite3
+    const PF_ParamUtilsSuite3* param_suite = nullptr;
+    PF_Err suite_err = in_data->pica_basicP->AcquireSuite(
+        kPFParamUtilsSuite, kPFParamUtilsSuiteVersion3,
+        reinterpret_cast<const void**>(&param_suite));
+
+    if (suite_err || !param_suite) return;
+
+    // Alpha Hint layer: disabled when Auto Generate
+    {
+        PF_ParamDef copy;
+        AEFX_CLR_STRUCT(copy);
+        copy = *params[PARAM_ALPHA_HINT_LAYER];
+        if (hint_mode == HintMode::AutoGenerate) {
+            copy.ui_flags |= PF_PUI_DISABLED;
+        } else {
+            copy.ui_flags &= ~PF_PUI_DISABLED;
+        }
+        param_suite->PF_UpdateParamUI(in_data->effect_ref,
+                                      PARAM_ALPHA_HINT_LAYER, &copy);
+    }
+
+    // Screen Clip: disabled when Layer mode
+    {
+        PF_ParamDef copy;
+        AEFX_CLR_STRUCT(copy);
+        copy = *params[PARAM_SCREEN_CLIP];
+        if (hint_mode == HintMode::Layer) {
+            copy.ui_flags |= PF_PUI_DISABLED;
+        } else {
+            copy.ui_flags &= ~PF_PUI_DISABLED;
+        }
+        param_suite->PF_UpdateParamUI(in_data->effect_ref,
+                                      PARAM_SCREEN_CLIP, &copy);
+    }
+
+    in_data->pica_basicP->ReleaseSuite(kPFParamUtilsSuite, kPFParamUtilsSuiteVersion3);
+#endif
+}
+
+A_Err HandleUpdateParamsUI(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[])
+{
+#if AE_SDK_AVAILABLE
+    UpdateHintModeVisibility(in_data, params);
+#endif
+    return PF_Err_NONE;
+}
+
 A_Err HandleUserChangedParam(PF_InData* in_data, PF_OutData* out_data, PF_ParamDef* params[], PF_UserChangedParamExtra* extra)
 {
 #if AE_SDK_AVAILABLE
@@ -200,10 +268,14 @@ A_Err HandleUserChangedParam(PF_InData* in_data, PF_OutData* out_data, PF_ParamD
             "Based on the green-screen keying technique created by\n"
             "Niko Pueringer of Corridor Digital (youtube.com/CorridorCrew).\n\n"
             "Physically accurate foreground/background unmixing\n"
-            "powered by MLX on Apple Silicon.",
+            "powered by MLX on Apple Silicon and PyTorch/CUDA on Windows.",
             CK_VERSION_STRING
         );
         out_data->out_flags |= PF_OutFlag_DISPLAY_ERROR_MESSAGE;
+    }
+
+    if (extra->param_index == PARAM_HINT_MODE) {
+        UpdateHintModeVisibility(in_data, params);
     }
 #endif
     return PF_Err_NONE;

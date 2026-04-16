@@ -6,6 +6,7 @@
 #include "CorridorKeyAE_Render.h"
 #include "CorridorKeyAE_Params.h"
 #include "CorridorKeyAE_Bridge.h"
+#include "CorridorKeyAE_AutoHint.h"
 #include "CorridorKeyAE_UI.h"
 
 #if AE_SDK_AVAILABLE
@@ -20,7 +21,7 @@ namespace corridorkey {
 
 // =============================================================================
 // Minimal 5x7 bitmap font (uppercase + digits + basic punctuation)
-// Each character is 5 columns × 7 rows, stored as 7 bytes (1 bit per column).
+// Each character is 5 columns x 7 rows, stored as 7 bytes (1 bit per column).
 // =============================================================================
 
 #if AE_SDK_AVAILABLE
@@ -80,7 +81,7 @@ static const unsigned char FONT_5X7[][7] = {
     {0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C},
     // : (58)
     {0x00,0x00,0x04,0x00,0x04,0x00,0x00},
-    // skip ; < = > ? (59-63) — fill with blanks
+    // skip ; < = > ? (59-63) -- fill with blanks
     {0x00,0x00,0x00,0x00,0x00,0x00,0x00},
     {0x00,0x00,0x00,0x00,0x00,0x00,0x00},
     {0x00,0x00,0x00,0x00,0x00,0x00,0x00},
@@ -119,7 +120,7 @@ static const unsigned char FONT_5X7[][7] = {
 
 static int FontIndex(char c) {
     if (c >= 32 && c <= 90) return c - 32;
-    // Lowercase → uppercase
+    // Lowercase -> uppercase
     if (c >= 'a' && c <= 'z') return (c - 'a') + ('A' - 32);
     return 0; // space for unknown
 }
@@ -168,7 +169,7 @@ void DrawText(PF_LayerDef* layer, int x, int y, const char* text, PF_Pixel8 colo
         for (int row = 0; row < 7; row++) {
             for (int col = 0; col < 5; col++) {
                 if (glyph[row] & (0x10 >> col)) {
-                    // Draw a scale×scale block for each pixel
+                    // Draw a scale x scale block for each pixel
                     for (int sy = 0; sy < scale; sy++) {
                         for (int sx = 0; sx < scale; sx++) {
                             SetPixel8(layer,
@@ -284,7 +285,7 @@ static void WriteFrom8bpc(PF_LayerDef* layer, const uint8_t* src8, int bpp) {
 static RuntimeBridge g_bridge;
 
 // =============================================================================
-// Main render
+// Main render (legacy, 8/16bpc non-smart path)
 // =============================================================================
 
 A_Err RenderEffect(
@@ -305,54 +306,95 @@ A_Err RenderEffect(
     PF_LayerDef* input = &params[0]->u.ld;
     int bpp = DetectBytesPerPixel(input);
 
-    // Try to connect to the Python runtime
+    // Read hint mode and output mode
+    auto hint_mode = static_cast<HintMode>(params[PARAM_HINT_MODE]->u.pd.value - 1);
+    auto output_mode = static_cast<OutputMode>(params[PARAM_OUTPUT_MODE]->u.pd.value - 1);
+
+    // --- Alpha Hint output mode: short-circuit, no IPC ---
+    if (output_mode == OutputMode::AlphaHint) {
+        if (hint_mode == HintMode::AutoGenerate) {
+            // Generate auto-hint from input
+            std::vector<uint8_t> input_8bpc = ConvertTo8bpc(input, bpp);
+            std::vector<uint8_t> hint_8bpc(input->width * input->height * 4);
+            float screen_clip = static_cast<float>(params[PARAM_SCREEN_CLIP]->u.fs_d.value);
+            GenerateAutoHint(input_8bpc.data(), input->width, input->height,
+                             input->width * 4, hint_8bpc.data(), screen_clip);
+            WriteFrom8bpc(output, hint_8bpc.data(), bpp);
+        } else {
+            // Layer mode: checkout the hint layer and display it
+            PF_ParamDef hint_param;
+            AEFX_CLR_STRUCT(hint_param);
+            ERR(PF_CHECKOUT_PARAM(in_data, PARAM_ALPHA_HINT_LAYER,
+                                  in_data->current_time, in_data->time_step,
+                                  in_data->time_scale, &hint_param));
+            if (!err && hint_param.u.ld.data) {
+                PF_LayerDef* hint_layer = &hint_param.u.ld;
+                int hint_bpp = DetectBytesPerPixel(hint_layer);
+                std::vector<uint8_t> hint_8bpc = ConvertTo8bpc(hint_layer, hint_bpp);
+                WriteFrom8bpc(output, hint_8bpc.data(), bpp);
+            }
+            // else: no hint layer selected -- output stays as input copy (passthrough)
+            ERR2(PF_CHECKIN_PARAM(in_data, &hint_param));
+        }
+        return err;
+    }
+
+    // --- Normal processing: send frame to runtime ---
     bool bridge_ok = g_bridge.EnsureConnected();
 
     if (bridge_ok) {
-        // --- Bridge connected: send frame to Python for processing ---
         FrameRequest request;
         request.width = input->width;
         request.height = input->height;
-
-        // Always send 8bpc to the bridge (model only works at 8bpc)
         request.pixel_data = ConvertTo8bpc(input, bpp);
-        request.rowbytes = input->width * 4; // 8bpc, no padding
+        request.rowbytes = input->width * 4;
 
-        // Read effect parameters from AE. Slider values are PF_FpLong (double) —
-        // cast explicitly to float to match our FrameRequest fields and silence
-        // MSVC C4244 truncation warnings.
-        request.output_mode = params[PARAM_OUTPUT_MODE]->u.pd.value - 1;
+        // Read effect parameters
+        request.output_mode   = RuntimeOutputMode(output_mode);
         request.despill       = static_cast<float>(params[PARAM_DESPILL_STRENGTH]->u.fs_d.value);
         request.despeckle     = static_cast<float>(params[PARAM_DESPECKLE_STRENGTH]->u.fs_d.value);
         request.refiner       = static_cast<float>(params[PARAM_REFINER_STRENGTH]->u.fs_d.value);
         request.matte_cleanup = static_cast<float>(params[PARAM_MATTE_CLEANUP]->u.fs_d.value);
 
-        // Check out the alpha hint layer (if user selected one)
-        PF_ParamDef hint_param;
-        AEFX_CLR_STRUCT(hint_param);
-        ERR(PF_CHECKOUT_PARAM(in_data, PARAM_ALPHA_HINT_LAYER,
-                              in_data->current_time, in_data->time_step,
-                              in_data->time_scale, &hint_param));
-        if (!err && hint_param.u.ld.data) {
-            PF_LayerDef* hint_layer = &hint_param.u.ld;
-            int hint_bpp = DetectBytesPerPixel(hint_layer);
+        // Generate or checkout alpha hint
+        if (hint_mode == HintMode::AutoGenerate) {
+            // Auto-generate from input pixels
+            float screen_clip_val = static_cast<float>(params[PARAM_SCREEN_CLIP]->u.fs_d.value);
+            std::vector<uint8_t> hint_8bpc(input->width * input->height * 4);
+            GenerateAutoHint(request.pixel_data.data(), input->width, input->height,
+                             input->width * 4, hint_8bpc.data(), screen_clip_val);
             request.has_alpha_hint = true;
-            request.hint_width = hint_layer->width;
-            request.hint_height = hint_layer->height;
-            request.hint_pixel_data = ConvertTo8bpc(hint_layer, hint_bpp);
-            request.hint_rowbytes = hint_layer->width * 4;
+            request.hint_width = input->width;
+            request.hint_height = input->height;
+            request.hint_pixel_data = std::move(hint_8bpc);
+            request.hint_rowbytes = input->width * 4;
+        } else {
+            // Layer mode: checkout hint layer
+            PF_ParamDef hint_param;
+            AEFX_CLR_STRUCT(hint_param);
+            ERR(PF_CHECKOUT_PARAM(in_data, PARAM_ALPHA_HINT_LAYER,
+                                  in_data->current_time, in_data->time_step,
+                                  in_data->time_scale, &hint_param));
+            if (!err && hint_param.u.ld.data) {
+                PF_LayerDef* hint_layer = &hint_param.u.ld;
+                int hint_bpp = DetectBytesPerPixel(hint_layer);
+                request.has_alpha_hint = true;
+                request.hint_width = hint_layer->width;
+                request.hint_height = hint_layer->height;
+                request.hint_pixel_data = ConvertTo8bpc(hint_layer, hint_bpp);
+                request.hint_rowbytes = hint_layer->width * 4;
+            }
+            ERR2(PF_CHECKIN_PARAM(in_data, &hint_param));
         }
-        ERR2(PF_CHECKIN_PARAM(in_data, &hint_param));
 
         FrameResponse response;
         if (g_bridge.ProcessFrame(request, response) && response.success) {
-            // Write 8bpc result back at the output's native bit depth
             size_t expected = static_cast<size_t>(output->width) * output->height * 4;
             if (response.pixel_data.size() >= expected) {
                 WriteFrom8bpc(output, response.pixel_data.data(), bpp);
             }
         } else {
-            // Bridge error — show error overlay (8bpc drawing on output)
+            // Bridge error overlay (8bpc only)
             if (bpp == 4) {
                 PF_Pixel8 bg = {180, 80, 0, 0};
                 DrawRect(output, 0, 0, output->width, 50, bg);
@@ -361,9 +403,8 @@ A_Err RenderEffect(
             }
         }
     } else {
-        // --- Bridge offline: show fallback diagnostic overlay ---
+        // Bridge offline overlay
         if (bpp == 4) {
-            // Only draw text overlay at 8bpc (safe)
             PF_Pixel8 bg = {180, 0, 0, 0};
             int bar_height = 40;
             if (output->height > 200) bar_height = 60;
@@ -377,7 +418,6 @@ A_Err RenderEffect(
             PF_Pixel8 yellow = {255, 255, 200, 0};
             DrawText(output, 10, 8 + 7 * text_scale + 4, "BRIDGE: OFFLINE", yellow, 2);
         }
-        // At 16/32bpc without bridge: just passthrough (already copied above)
     }
 
     return err;
@@ -424,8 +464,9 @@ A_Err SmartPreRender(
         UnionLRect(&in_result.max_result_rect,  &extra->output->max_result_rect);
     }
 
-    // Also request the alpha hint layer (if it will be available)
-    // Note: we can't check the param value during pre-render, so just request it
+    // Also request the alpha hint layer (if it will be available).
+    // We can't check the hint mode param during pre-render, so just
+    // request it unconditionally -- it's harmless if unused.
     PF_CheckoutResult hint_result;
     extra->cb->checkout_layer(
         in_data->effect_ref,
@@ -436,7 +477,7 @@ A_Err SmartPreRender(
         in_data->time_step,
         in_data->time_scale,
         &hint_result);
-    // Ignore hint checkout errors — it's optional
+    // Ignore hint checkout errors -- it's optional
 
     return err;
 }
@@ -460,7 +501,74 @@ A_Err SmartRender(
 
     int bpp = DetectBytesPerPixel(input_world);
 
-    // Try bridge connection
+    // --- Read hint mode and output mode early ---
+    PF_ParamDef hint_mode_param, mode_param;
+    AEFX_CLR_STRUCT(hint_mode_param);
+    AEFX_CLR_STRUCT(mode_param);
+    ERR(PF_CHECKOUT_PARAM(in_data, PARAM_HINT_MODE, in_data->current_time,
+                          in_data->time_step, in_data->time_scale, &hint_mode_param));
+    ERR(PF_CHECKOUT_PARAM(in_data, PARAM_OUTPUT_MODE, in_data->current_time,
+                          in_data->time_step, in_data->time_scale, &mode_param));
+
+    auto hint_mode = HintMode::AutoGenerate;
+    auto output_mode = OutputMode::Processed;
+    if (!err) {
+        hint_mode = static_cast<HintMode>(hint_mode_param.u.pd.value - 1);
+        output_mode = static_cast<OutputMode>(mode_param.u.pd.value - 1);
+    }
+
+    ERR2(PF_CHECKIN_PARAM(in_data, &hint_mode_param));
+    ERR2(PF_CHECKIN_PARAM(in_data, &mode_param));
+
+    // =====================================================================
+    // Alpha Hint output mode: short-circuit, no IPC
+    // =====================================================================
+    if (output_mode == OutputMode::AlphaHint) {
+        std::vector<uint8_t> input_8bpc = ConvertTo8bpc(input_world, bpp);
+
+        if (hint_mode == HintMode::AutoGenerate) {
+            // Read Screen Clip param
+            PF_ParamDef clip_param;
+            AEFX_CLR_STRUCT(clip_param);
+            ERR(PF_CHECKOUT_PARAM(in_data, PARAM_SCREEN_CLIP, in_data->current_time,
+                                  in_data->time_step, in_data->time_scale, &clip_param));
+            float screen_clip_val = err ? 0.75f : static_cast<float>(clip_param.u.fs_d.value);
+            ERR2(PF_CHECKIN_PARAM(in_data, &clip_param));
+
+            // Generate auto-hint from input
+            std::vector<uint8_t> hint_8bpc(input_world->width * input_world->height * 4);
+            GenerateAutoHint(input_8bpc.data(), input_world->width, input_world->height,
+                             input_world->width * 4, hint_8bpc.data(), screen_clip_val);
+            WriteFrom8bpc(output_world, hint_8bpc.data(), bpp);
+        } else {
+            // Layer mode: checkout hint layer pixels
+            PF_EffectWorld* hint_world = nullptr;
+            extra->cb->checkout_layer_pixels(in_data->effect_ref, CK_HINT_CHECKOUT_ID, &hint_world);
+            if (hint_world && hint_world->data) {
+                int hint_bpp = DetectBytesPerPixel(hint_world);
+                std::vector<uint8_t> hint_8bpc = ConvertTo8bpc(hint_world, hint_bpp);
+                WriteFrom8bpc(output_world, hint_8bpc.data(), bpp);
+            } else {
+                // No hint layer selected -- passthrough input
+                for (int y = 0; y < output_world->height; y++) {
+                    memcpy(
+                        reinterpret_cast<char*>(output_world->data) + y * output_world->rowbytes,
+                        reinterpret_cast<char*>(input_world->data) + y * input_world->rowbytes,
+                        output_world->rowbytes
+                    );
+                }
+            }
+        }
+
+        g_status.bridge_connected = true;
+        snprintf(g_status.status_text, sizeof(g_status.status_text),
+                 "Alpha Hint preview  |  %dx%d", input_world->width, input_world->height);
+        return err;
+    }
+
+    // =====================================================================
+    // Normal processing: generate/checkout hint, send to runtime
+    // =====================================================================
     bool bridge_ok = g_bridge.EnsureConnected();
 
     if (bridge_ok) {
@@ -471,18 +579,15 @@ A_Err SmartRender(
         request.pixel_data = ConvertTo8bpc(input_world, bpp);
         request.rowbytes = input_world->width * 4;
 
-        // Read effect params
-        PF_ParamDef mode_param, quality_param, despill_param, despeckle_param,
+        // Read remaining effect params
+        PF_ParamDef quality_param, despill_param, despeckle_param,
                     refiner_param, cleanup_param;
-        AEFX_CLR_STRUCT(mode_param);
         AEFX_CLR_STRUCT(quality_param);
         AEFX_CLR_STRUCT(despill_param);
         AEFX_CLR_STRUCT(despeckle_param);
         AEFX_CLR_STRUCT(refiner_param);
         AEFX_CLR_STRUCT(cleanup_param);
 
-        ERR(PF_CHECKOUT_PARAM(in_data, PARAM_OUTPUT_MODE, in_data->current_time,
-                              in_data->time_step, in_data->time_scale, &mode_param));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_QUALITY_MODE, in_data->current_time,
                               in_data->time_step, in_data->time_scale, &quality_param));
         ERR(PF_CHECKOUT_PARAM(in_data, PARAM_DESPILL_STRENGTH, in_data->current_time,
@@ -495,7 +600,8 @@ A_Err SmartRender(
                               in_data->time_step, in_data->time_scale, &cleanup_param));
 
         if (!err) {
-            request.output_mode   = mode_param.u.pd.value - 1;
+            // Remap output mode for the runtime wire format
+            request.output_mode   = RuntimeOutputMode(output_mode);
             request.quality_mode  = quality_param.u.pd.value - 1;
             request.despill       = static_cast<float>(despill_param.u.fs_d.value);
             request.despeckle     = static_cast<float>(despeckle_param.u.fs_d.value);
@@ -503,35 +609,45 @@ A_Err SmartRender(
             request.matte_cleanup = static_cast<float>(cleanup_param.u.fs_d.value);
         }
 
-        ERR2(PF_CHECKIN_PARAM(in_data, &mode_param));
         ERR2(PF_CHECKIN_PARAM(in_data, &quality_param));
         ERR2(PF_CHECKIN_PARAM(in_data, &despill_param));
         ERR2(PF_CHECKIN_PARAM(in_data, &despeckle_param));
         ERR2(PF_CHECKIN_PARAM(in_data, &refiner_param));
         ERR2(PF_CHECKIN_PARAM(in_data, &cleanup_param));
 
-        // Try to checkout alpha hint pixels
-        PF_EffectWorld* hint_world = nullptr;
-        extra->cb->checkout_layer_pixels(in_data->effect_ref, CK_HINT_CHECKOUT_ID, &hint_world);
-        if (hint_world && hint_world->data) {
-            int hint_bpp = DetectBytesPerPixel(hint_world);
+        // Generate or checkout alpha hint
+        if (hint_mode == HintMode::AutoGenerate) {
+            // Read Screen Clip param
+            PF_ParamDef clip_param;
+            AEFX_CLR_STRUCT(clip_param);
+            ERR(PF_CHECKOUT_PARAM(in_data, PARAM_SCREEN_CLIP, in_data->current_time,
+                                  in_data->time_step, in_data->time_scale, &clip_param));
+            float screen_clip_val = err ? 0.75f : static_cast<float>(clip_param.u.fs_d.value);
+            ERR2(PF_CHECKIN_PARAM(in_data, &clip_param));
+
+            std::vector<uint8_t> hint_8bpc(input_world->width * input_world->height * 4);
+            GenerateAutoHint(request.pixel_data.data(), input_world->width, input_world->height,
+                             input_world->width * 4, hint_8bpc.data(), screen_clip_val);
             request.has_alpha_hint = true;
-            request.hint_width = hint_world->width;
-            request.hint_height = hint_world->height;
-            request.hint_pixel_data = ConvertTo8bpc(hint_world, hint_bpp);
-            request.hint_rowbytes = hint_world->width * 4;
+            request.hint_width = input_world->width;
+            request.hint_height = input_world->height;
+            request.hint_pixel_data = std::move(hint_8bpc);
+            request.hint_rowbytes = input_world->width * 4;
+        } else {
+            // Layer mode: try to checkout alpha hint pixels
+            PF_EffectWorld* hint_world = nullptr;
+            extra->cb->checkout_layer_pixels(in_data->effect_ref, CK_HINT_CHECKOUT_ID, &hint_world);
+            if (hint_world && hint_world->data) {
+                int hint_bpp = DetectBytesPerPixel(hint_world);
+                request.has_alpha_hint = true;
+                request.hint_width = hint_world->width;
+                request.hint_height = hint_world->height;
+                request.hint_pixel_data = ConvertTo8bpc(hint_world, hint_bpp);
+                request.hint_rowbytes = hint_world->width * 4;
+            }
         }
 
-        // Process through bridge. If the runtime replies with a LOADING
-        // status, the engine is still initialising (first-run download +
-        // warmup). We DO NOT return a pass-through frame in that case —
-        // AE would cache it as the final render for that (time, params)
-        // combination and we'd be stuck with wrong output until the user
-        // wiggled a slider. Instead, block this render call until the
-        // engine is ready or we hit a hard timeout, updating g_status
-        // each iteration so the custom UI can show progress. SmartRender
-        // runs on a worker thread (MFR), so AE's main thread stays free
-        // to redraw the UI while we wait.
+        // Process through bridge with loading-wait loop
         FrameResponse response;
         bool ok = false;
         float ms = 0.0f;
@@ -545,7 +661,7 @@ A_Err SmartRender(
                 ok = g_bridge.ProcessFrame(request, response) && response.success;
                 if (ok || !response.loading) break;
 
-                // Engine is still loading — update status and retry.
+                // Engine is still loading -- update status and retry.
                 g_status.bridge_connected = true;
                 const char* detail = response.loading_detail.empty()
                     ? "Starting up" : response.loading_detail.c_str();
@@ -583,15 +699,13 @@ A_Err SmartRender(
         } else {
             g_status.bridge_connected = true;
             if (response.loading) {
-                // Hit the 2-minute loading timeout. Very unusual — probably
-                // means the weight download is stuck or the network is dead.
                 snprintf(g_status.status_text, sizeof(g_status.status_text),
-                         "Model load timed out — retry");
+                         "Model load timed out - retry");
             } else {
                 snprintf(g_status.status_text, sizeof(g_status.status_text),
                          "Bridge error");
             }
-            // Fallback: copy input to output (same for error and loading-timeout)
+            // Fallback: copy input to output
             if (input_world->width == output_world->width &&
                 input_world->height == output_world->height) {
                 for (int y = 0; y < output_world->height; y++) {

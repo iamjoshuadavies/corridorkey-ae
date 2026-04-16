@@ -27,22 +27,38 @@ A_Err SetupParams(PF_InData* in_data, PF_OutData* out_data)
     // Register for custom UI events
     RegisterCustomUI(in_data);
 
-    // --- Output Mode ---
+    // --- Hint Mode ---
     AEFX_CLR_STRUCT(def);
     PF_ADD_POPUP(
-        "Output Mode",
-        4,                  // num_choices
-        1,                  // default
-        "Processed|Matte|Foreground|Composite",
-        PARAM_OUTPUT_MODE
+        "Hint Mode",
+        2,                  // num_choices
+        1,                  // default: Auto Generate (1-indexed)
+        "Auto Generate|Layer",
+        PARAM_HINT_MODE
     );
 
     // --- Alpha Hint Layer ---
+    // Greyed out when Hint Mode == Auto Generate (handled in USER_CHANGED_PARAM)
     AEFX_CLR_STRUCT(def);
     PF_ADD_LAYER(
         "Alpha Hint",
-        PF_LayerDefault_NONE,   // No default layer — user must select
+        PF_LayerDefault_NONE,   // No default layer -- user must select
         PARAM_ALPHA_HINT_LAYER
+    );
+
+    // --- Screen Clip ---
+    // Tightens the auto-generated key by crushing dark values to black.
+    // Only meaningful when Hint Mode == Auto Generate. Higher = cleaner
+    // background but may eat into soft edges.
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_FLOAT_SLIDERX(
+        "Screen Clip",
+        0.0, 1.0,          // valid min/max
+        0.0, 1.0,          // slider min/max
+        0.75,               // default: aggressive threshold for clean keys
+        PF_Precision_HUNDREDTHS,
+        0, 0,
+        PARAM_SCREEN_CLIP
     );
 
     // --- Quality Mode ---
@@ -50,7 +66,7 @@ A_Err SetupParams(PF_InData* in_data, PF_OutData* out_data)
     PF_ADD_POPUP(
         "Quality",
         4,                  // num_choices
-        4,                  // default: Full Res (Tiled) — last item
+        4,                  // default: Full Res (Tiled) -- last item
         "Fastest (256)|Fast (512)|High (1024)|Full Res (Tiled)",
         PARAM_QUALITY_MODE
     );
@@ -101,6 +117,16 @@ A_Err SetupParams(PF_InData* in_data, PF_OutData* out_data)
         PF_Precision_HUNDREDTHS,
         0, 0,
         PARAM_MATTE_CLEANUP
+    );
+
+    // --- Output Mode (at the bottom -- inspect output after tweaking params) ---
+    AEFX_CLR_STRUCT(def);
+    PF_ADD_POPUP(
+        "Output Mode",
+        5,                  // num_choices
+        5,                  // default: Processed (5th item, 1-indexed)
+        "Alpha Hint|Matte|Foreground|Composite|Processed",
+        PARAM_OUTPUT_MODE
     );
 
     out_data->num_params = PARAM_COUNT;

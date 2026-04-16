@@ -47,6 +47,7 @@ set(PLUGIN_SOURCES
     src/CorridorKeyAE_Render.cpp
     src/CorridorKeyAE_Bridge.cpp
     src/CorridorKeyAE_UI.cpp
+    src/CorridorKeyAE_AutoHint.cpp
 )
 
 # SDK utility sources needed for smart render
@@ -66,6 +67,7 @@ set(PLUGIN_HEADERS
     include/CorridorKeyAE_Version.h
     include/CorridorKeyAE_UI.h
     include/CorridorKeyAE_Logo.h
+    include/CorridorKeyAE_AutoHint.h
 )
 
 # --- Build target ---
